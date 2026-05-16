@@ -3,8 +3,8 @@ Pydantic schemas for API request/response models.
 These define the contracts between the frontend and backend.
 """
 
-from datetime import datetime
-from typing import Optional, Any
+from datetime import datetime, timezone
+from typing import Optional, Any, Union
 from enum import Enum
 from pydantic import BaseModel, Field
 from uuid import UUID
@@ -95,20 +95,20 @@ class SimulationRespond(BaseModel):
 
 class ProfileResponse(BaseModel):
     """User profile response."""
-    id: UUID
+    id: Union[str, UUID]
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
     company_name: Optional[str] = None
     role: str = "founder"
     credits: int = 10
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class IdeaResponse(BaseModel):
     """Startup idea response."""
-    id: UUID
-    user_id: UUID
+    id: Union[str, UUID]
+    user_id: Union[str, UUID] = "demo-user"
     title: str
     description: str
     industry: Optional[str] = None
@@ -119,8 +119,8 @@ class IdeaResponse(BaseModel):
     current_phase: Optional[str] = None
     progress: int = 0
     metadata: dict[str, Any] = {}
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class IdeaListResponse(BaseModel):
@@ -131,8 +131,8 @@ class IdeaListResponse(BaseModel):
 
 class AgentActivityResponse(BaseModel):
     """Agent activity event response."""
-    id: UUID
-    idea_id: UUID
+    id: Union[str, UUID]
+    idea_id: Union[str, UUID]
     agent_name: str
     agent_role: str
     action: str
@@ -141,21 +141,21 @@ class AgentActivityResponse(BaseModel):
     output_data: Optional[dict[str, Any]] = None
     duration_ms: Optional[int] = None
     tokens_used: Optional[int] = None
-    started_at: datetime
+    started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
 
 class WorkflowStateResponse(BaseModel):
     """Workflow state response."""
-    id: UUID
-    idea_id: UUID
+    id: Union[str, UUID]
+    idea_id: Union[str, UUID]
     graph_state: dict[str, Any]
     current_node: str
     iteration: int = 0
     quality_score: Optional[float] = None
     decision_log: list[dict[str, Any]] = []
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class WorkflowGraphResponse(BaseModel):
@@ -167,29 +167,29 @@ class WorkflowGraphResponse(BaseModel):
 
 class ReportResponse(BaseModel):
     """Generated report response."""
-    id: UUID
-    idea_id: UUID
+    id: Union[str, UUID]
+    idea_id: Union[str, UUID]
     report_type: ReportType
     title: str
     content: dict[str, Any]
     file_url: Optional[str] = None
     version: int = 1
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
 
 class SimulationResponse(BaseModel):
     """Investor simulation response."""
-    id: UUID
-    idea_id: UUID
+    id: Union[str, UUID]
+    idea_id: Union[str, UUID]
     simulation_type: str = "pitch"
-    investor_profiles: list[dict[str, Any]]
+    investor_profiles: Any = []
     transcript: list[dict[str, Any]] = []
     outcome: Optional[str] = None
     funding_offered: Optional[float] = None
     valuation: Optional[float] = None
     feedback: Optional[dict[str, Any]] = None
     score: Optional[float] = None
-    started_at: datetime
+    started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
 
@@ -234,10 +234,10 @@ class WSSimulationEvent(BaseModel):
 
 class LaunchResponse(BaseModel):
     """Response when launching the incubation workflow."""
-    idea_id: UUID
+    idea_id: Union[str, UUID]
     status: str = "launched"
     message: str = "Incubation workflow started successfully."
-    workflow_id: Optional[UUID] = None
+    workflow_id: Optional[Union[str, UUID]] = None
 
 
 class ErrorResponse(BaseModel):

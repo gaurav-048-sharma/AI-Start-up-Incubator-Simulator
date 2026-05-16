@@ -8,7 +8,9 @@
 .investorFirm { font-size: var(--fs-xs); color: var(--text-tertiary); }
 .investorMeta { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
 
-.chatContainer { display: flex; flex-direction: column; height: 500px; overflow: hidden; }
+.chatContainer { display: flex; flex-direction: column; max-height: 600px; overflow: hidden; }
+.controls { padding: var(--space-5); margin-bottom: 0; }
+.controlRow { display: flex; align-items: flex-end; gap: var(--space-4); }
 .chatHeader {
   padding: var(--space-4) var(--space-5); display: flex; justify-content: space-between; align-items: center;
   border-bottom: 1px solid var(--border-subtle);
