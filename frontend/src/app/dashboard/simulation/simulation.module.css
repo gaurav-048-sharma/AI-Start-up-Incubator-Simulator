@@ -1,0 +1,29 @@
+.subtitle { color: var(--text-secondary); font-size: var(--fs-sm); margin-bottom: var(--space-6); }
+.investorPanel { margin-bottom: var(--space-6); }
+.panelTitle { font-size: var(--fs-base); font-weight: 600; margin-bottom: var(--space-4); }
+.investorGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-4); }
+.investorCard { padding: var(--space-5); text-align: center; display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
+.investorAvatar { font-size: 2.5rem; }
+.investorName { font-size: var(--fs-sm); font-weight: 600; }
+.investorFirm { font-size: var(--fs-xs); color: var(--text-tertiary); }
+.investorMeta { display: flex; gap: var(--space-2); margin-top: var(--space-2); }
+
+.chatContainer { display: flex; flex-direction: column; height: 500px; overflow: hidden; }
+.chatHeader {
+  padding: var(--space-4) var(--space-5); display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.chatHeader h3 { font-size: var(--fs-base); font-weight: 600; }
+.chatMessages { flex: 1; overflow-y: auto; padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
+.message { max-width: 80%; padding: var(--space-4); border-radius: var(--radius-lg); }
+.messageFounder { align-self: flex-end; background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.2); }
+.messageInvestor { align-self: flex-start; background: var(--bg-tertiary); border: 1px solid var(--border-default); }
+.messageSpeaker { font-size: var(--fs-xs); font-weight: 600; margin-bottom: var(--space-2); color: var(--text-tertiary); }
+.messageContent { font-size: var(--fs-sm); line-height: 1.7; color: var(--text-secondary); }
+.typingWrap { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); }
+.typingLabel { font-size: var(--fs-xs); color: var(--text-muted); }
+.chatInput {
+  padding: var(--space-4) var(--space-5); display: flex; gap: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+}
+@media (max-width: 768px) { .investorGrid { grid-template-columns: 1fr; } }

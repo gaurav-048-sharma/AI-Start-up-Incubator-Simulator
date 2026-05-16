@@ -1,0 +1,282 @@
+.landing {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Hero Section ────────────────────────────────────────────── */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-8) var(--space-6);
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.12), transparent 70%);
+  top: -100px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: float 8s ease-in-out infinite;
+}
+
+.heroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--radius-full);
+  font-size: var(--fs-sm);
+  color: var(--accent-tertiary);
+  margin-bottom: var(--space-8);
+  animation: fadeIn 0.6s ease-out;
+}
+
+.heroBadgeDot {
+  width: 6px;
+  height: 6px;
+  background: var(--success);
+  border-radius: 50%;
+  animation: pulse-glow 2s infinite;
+}
+
+.heroTitle {
+  font-size: clamp(2.5rem, 6vw, var(--fs-hero));
+  font-weight: 800;
+  line-height: 1.1;
+  max-width: 900px;
+  margin-bottom: var(--space-6);
+  animation: fadeInUp 0.8s ease-out;
+}
+
+.heroSubtitle {
+  font-size: var(--fs-lg);
+  color: var(--text-secondary);
+  max-width: 640px;
+  margin-bottom: var(--space-10);
+  line-height: 1.7;
+  animation: fadeInUp 0.8s ease-out 0.15s both;
+}
+
+.heroActions {
+  display: flex;
+  gap: var(--space-4);
+  animation: fadeInUp 0.8s ease-out 0.3s both;
+}
+
+.heroStats {
+  display: flex;
+  gap: var(--space-12);
+  margin-top: var(--space-16);
+  animation: fadeInUp 0.8s ease-out 0.45s both;
+}
+
+.heroStat {
+  text-align: center;
+}
+
+.heroStatValue {
+  font-size: var(--fs-3xl);
+  font-weight: 800;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.heroStatLabel {
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+  margin-top: var(--space-1);
+}
+
+/* ── Features Section ────────────────────────────────────────── */
+.features {
+  padding: var(--space-16) var(--space-6);
+}
+
+.sectionHeader {
+  text-align: center;
+  max-width: 640px;
+  margin: 0 auto var(--space-12);
+}
+
+.sectionLabel {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent-primary);
+  margin-bottom: var(--space-3);
+}
+
+.sectionTitle {
+  font-size: var(--fs-3xl);
+  font-weight: 700;
+  margin-bottom: var(--space-4);
+}
+
+.sectionSubtitle {
+  font-size: var(--fs-base);
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.featuresGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-6);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.featureCard {
+  padding: var(--space-8);
+}
+
+.featureIcon {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-gradient);
+  border-radius: var(--radius-md);
+  font-size: 1.5rem;
+  margin-bottom: var(--space-5);
+}
+
+.featureTitle {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-3);
+}
+
+.featureDesc {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+/* ── Agents Section ──────────────────────────────────────────── */
+.agents {
+  padding: var(--space-16) var(--space-6);
+}
+
+.agentsGrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-4);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.agentCard {
+  padding: var(--space-6);
+  text-align: center;
+}
+
+.agentAvatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--accent-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  margin: 0 auto var(--space-4);
+}
+
+.agentName {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+}
+
+.agentRole {
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+/* ── CTA Section ─────────────────────────────────────────────── */
+.cta {
+  padding: var(--space-16) var(--space-6);
+  text-align: center;
+}
+
+.ctaCard {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: var(--space-12);
+  position: relative;
+  overflow: hidden;
+}
+
+.ctaCard::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent-gradient);
+  opacity: 0.05;
+  pointer-events: none;
+}
+
+.ctaTitle {
+  font-size: var(--fs-3xl);
+  font-weight: 700;
+  margin-bottom: var(--space-4);
+}
+
+.ctaSubtitle {
+  color: var(--text-secondary);
+  margin-bottom: var(--space-8);
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ── Footer ──────────────────────────────────────────────────── */
+.footer {
+  padding: var(--space-8) var(--space-6);
+  border-top: 1px solid var(--border-subtle);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .featuresGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .agentsGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .featuresGrid,
+  .agentsGrid {
+    grid-template-columns: 1fr;
+  }
+  .heroStats {
+    flex-direction: column;
+    gap: var(--space-6);
+  }
+  .heroActions {
+    flex-direction: column;
+    width: 100%;
+    max-width: 300px;
+  }
+}

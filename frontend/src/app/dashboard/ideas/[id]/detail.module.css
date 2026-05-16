@@ -1,0 +1,26 @@
+.header { display: flex; justify-content: space-between; margin-bottom: var(--space-6); }
+.backLink { font-size: var(--fs-sm); color: var(--text-tertiary); display: block; margin-bottom: var(--space-2); }
+.title { font-size: var(--fs-2xl); font-weight: 700; margin-bottom: var(--space-2); }
+.meta { display: flex; align-items: center; gap: var(--space-2); }
+.date { font-size: var(--fs-xs); color: var(--text-muted); }
+.headerActions { display: flex; gap: var(--space-2); align-items: flex-start; }
+.timeline { padding: var(--space-6); margin-bottom: var(--space-6); }
+.timelineTitle { font-size: var(--fs-base); font-weight: 600; margin-bottom: var(--space-5); }
+.phases { display: flex; justify-content: space-between; position: relative; }
+.phase { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); position: relative; z-index: 1; }
+.phaseIcon { width: 44px; height: 44px; border-radius: 50%; background: var(--bg-tertiary); display: flex; align-items: center; justify-content: center; font-size: 1.2rem; border: 2px solid var(--border-default); }
+.phase_completed .phaseIcon { background: var(--success-soft); border-color: var(--success); }
+.phase_active .phaseIcon { background: rgba(99,102,241,0.15); border-color: var(--accent-primary); animation: pulse-glow 2s infinite; }
+.phaseLabel { font-size: var(--fs-xs); font-weight: 500; color: var(--text-tertiary); }
+.phase_completed .phaseLabel { color: var(--success); }
+.phase_active .phaseLabel { color: var(--accent-tertiary); }
+.phaseConnector { position: absolute; top: 22px; left: 54px; width: calc(100% + 20px); height: 2px; background: var(--border-default); z-index: 0; }
+.phase_completed .phaseConnector { background: var(--success); }
+.contentGrid { display: grid; grid-template-columns: 1.5fr 1fr; gap: var(--space-6); }
+.descCard, .agentsCard { padding: var(--space-6); }
+.descCard h3, .agentsCard h3 { font-size: var(--fs-base); font-weight: 600; margin-bottom: var(--space-4); }
+.descCard h4 { font-size: var(--fs-sm); font-weight: 600; margin-top: var(--space-4); margin-bottom: var(--space-2); color: var(--accent-tertiary); }
+.descCard p { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.7; }
+.agentList { display: flex; flex-direction: column; gap: var(--space-3); }
+.agentRow { display: flex; justify-content: space-between; align-items: center; font-size: var(--fs-sm); }
+@media (max-width: 768px) { .contentGrid { grid-template-columns: 1fr; } }

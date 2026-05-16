@@ -1,0 +1,225 @@
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+  margin-bottom: var(--space-8);
+}
+
+.statCard {
+  padding: var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.statIcon {
+  font-size: 1.8rem;
+}
+
+.statValue {
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+}
+
+.statLabel {
+  font-size: var(--fs-sm);
+  color: var(--text-tertiary);
+}
+
+/* Quick Actions */
+.quickActions {
+  margin-bottom: var(--space-8);
+}
+
+.sectionTitle {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-4);
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-4);
+}
+
+.sectionHeader .sectionTitle {
+  margin-bottom: 0;
+}
+
+.actionGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-4);
+}
+
+.actionCard {
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-decoration: none;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.actionIcon {
+  font-size: 2rem;
+}
+
+.actionLabel {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+/* Recent Ideas */
+.recentSection {
+  margin-bottom: var(--space-8);
+}
+
+.ideaList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.ideaCard {
+  padding: var(--space-5);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-decoration: none;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.ideaInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.ideaTitle {
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+
+.ideaMeta {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.ideaProgress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.progressLabel {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  min-width: 36px;
+  text-align: right;
+}
+
+/* Activity Feed */
+.activitySection {
+  margin-bottom: var(--space-8);
+}
+
+.activityFeed {
+  padding: 0;
+  overflow: hidden;
+}
+
+.activityItem {
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.activityItem:last-child {
+  border-bottom: none;
+}
+
+.activityAgent {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  min-width: 180px;
+}
+
+.activityAction {
+  flex: 1;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+}
+
+.activityMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.activityTime {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  min-width: 60px;
+  text-align: right;
+}
+
+@media (max-width: 1024px) {
+  .statsGrid, .actionGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* Status Bar */
+.statusBar {
+  padding: var(--space-3) var(--space-5);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-6);
+}
+
+.statusTitle {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.statusServices {
+  display: flex;
+  gap: var(--space-2);
+}
+
+/* Empty State */
+.emptyState {
+  padding: var(--space-8);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+}
+
+@media (max-width: 768px) {
+  .statsGrid, .actionGrid {
+    grid-template-columns: 1fr;
+  }
+  .ideaCard {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+  .activityItem {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

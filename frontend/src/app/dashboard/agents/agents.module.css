@@ -1,0 +1,21 @@
+.subtitle { color: var(--text-secondary); font-size: var(--fs-sm); margin-bottom: var(--space-6); }
+.agentsGrid { display: flex; flex-direction: column; gap: var(--space-4); }
+.agentCard { padding: 0; overflow: hidden; }
+.cardHeader {
+  padding: var(--space-5); display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.agentInfo { display: flex; align-items: center; gap: var(--space-3); }
+.agentIcon { font-size: 1.5rem; }
+.agentName { font-size: var(--fs-base); font-weight: 600; }
+.agentRole { font-size: var(--fs-xs); color: var(--text-tertiary); }
+.cardBody { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.fieldLabel { font-size: var(--fs-xs); font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.fieldValue { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.6; }
+.cardFooter {
+  padding: var(--space-4) var(--space-5); display: flex; gap: var(--space-8);
+  border-top: 1px solid var(--border-subtle); background: rgba(0,0,0,0.15);
+}
+.metric { display: flex; flex-direction: column; gap: 2px; }
+.metricLabel { font-size: var(--fs-xs); color: var(--text-muted); }
+.metricValue { font-size: var(--fs-sm); font-weight: 600; color: var(--text-primary); }

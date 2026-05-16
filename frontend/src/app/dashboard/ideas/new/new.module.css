@@ -1,0 +1,53 @@
+.wrapper { max-width: 720px; margin: 0 auto; }
+.steps {
+  display: flex; justify-content: center; gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+.step {
+  display: flex; align-items: center; gap: var(--space-2);
+  color: var(--text-muted); font-size: var(--fs-sm);
+}
+.stepActive { color: var(--accent-tertiary); }
+.stepCircle {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--bg-tertiary); border: 2px solid var(--border-default);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); font-weight: 700;
+}
+.stepActive .stepCircle {
+  background: var(--accent-primary); border-color: var(--accent-primary); color: white;
+}
+.stepLabel { font-weight: 500; }
+.formCard { padding: var(--space-8); }
+.stepContent { display: flex; flex-direction: column; gap: var(--space-5); }
+.stepTitle { font-size: var(--fs-xl); font-weight: 600; }
+.stepDesc { color: var(--text-secondary); font-size: var(--fs-sm); }
+.fieldGroup { display: flex; flex-direction: column; }
+.fieldRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
+.actions {
+  display: flex; justify-content: flex-end; gap: var(--space-3);
+  margin-top: var(--space-4); padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.reviewCard { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.reviewItem { font-size: var(--fs-sm); color: var(--text-secondary); line-height: 1.6; }
+.reviewItem strong { color: var(--text-primary); }
+.launchInfo {
+  padding: var(--space-5); background: rgba(99, 102, 241, 0.05);
+  border: 1px solid rgba(99, 102, 241, 0.15); border-radius: var(--radius-md);
+}
+.launchInfo h3 { font-size: var(--fs-base); margin-bottom: var(--space-3); }
+.launchInfo ol {
+  list-style-position: inside; color: var(--text-secondary);
+  font-size: var(--fs-sm); display: flex; flex-direction: column; gap: var(--space-2);
+}
+@media (max-width: 768px) { .fieldRow { grid-template-columns: 1fr; } }
+.errorMsg {
+  padding: var(--space-3) var(--space-4);
+  background: var(--error-soft);
+  border: 1px solid var(--error);
+  border-radius: var(--radius-md);
+  color: var(--error);
+  font-size: var(--fs-sm);
+  flex: 1;
+}
