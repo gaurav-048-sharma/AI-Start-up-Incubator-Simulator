@@ -3,12 +3,13 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import styles from "./dashboard.module.css";
-import { ideasApi, type Idea } from "@/lib/api";
+import { ideasApi, analyticsApi, type Idea } from "@/lib/api";
 
 export default function DashboardPage() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
   const [backendStatus, setBackendStatus] = useState<Record<string, boolean>>({});
+  const [credits, setCredits] = useState<number | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -22,6 +23,12 @@ export default function DashboardPage() {
         // Load ideas
         const data = await ideasApi.list();
         setIdeas(data.ideas || []);
+
+        // Load credits
+        try {
+          const creditsData = await analyticsApi.getCredits();
+          setCredits(creditsData.credits);
+        } catch { /* skip */ }
       } catch {
         // Backend might not be connected to Supabase yet — use empty state
         setIdeas([]);
@@ -46,7 +53,7 @@ export default function DashboardPage() {
           { label: "Total Ideas", value: String(totalIdeas), icon: "💡", accent: "var(--accent-primary)" },
           { label: "In Progress", value: String(inProgress), icon: "⚡", accent: "var(--warning)" },
           { label: "Completed", value: String(completed), icon: "✅", accent: "var(--success)" },
-          { label: "Credits Left", value: "10", icon: "🪙", accent: "var(--accent-secondary)" },
+          { label: "Credits Left", value: credits !== null ? String(credits) : "—", icon: "🪙", accent: "var(--accent-secondary)" },
         ].map((stat) => (
           <div key={stat.label} className={`${styles.statCard} glass-card`}>
             <div className={styles.statIcon}>{stat.icon}</div>

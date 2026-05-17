@@ -1,0 +1,256 @@
+/* ── Compare Page ─────────────────────────────────────────────── */
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--space-6);
+}
+
+.selectionPanel {
+  padding: var(--space-6);
+}
+
+.panelTitle {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-4);
+}
+
+.ideaChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.ideaChip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-tertiary);
+  border: 2px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  min-width: 200px;
+}
+
+.ideaChip:hover:not(:disabled) {
+  border-color: var(--border-accent);
+  background: var(--bg-elevated);
+}
+
+.ideaChip:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ideaChipSelected {
+  border-color: var(--accent-primary);
+  background: rgba(99, 102, 241, 0.08);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.chipCheck {
+  font-size: var(--fs-lg);
+  width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.ideaChipSelected .chipCheck {
+  color: var(--accent-primary);
+}
+
+.chipInfo {
+  flex: 1;
+}
+
+.chipTitle {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.chipMeta {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.selectionFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.selectionCount {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+
+/* Results */
+.resultsSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin-top: var(--space-6);
+}
+
+.chartCard {
+  padding: var(--space-6);
+}
+
+.chartTitle {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-5);
+}
+
+.dimensionList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.dimensionRow {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+
+.dimLabel {
+  min-width: 140px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding-top: 4px;
+}
+
+.dimBars {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.barRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.barLabel {
+  min-width: 120px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  text-align: right;
+}
+
+.barTrack {
+  flex: 1;
+  height: 10px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+  min-width: 4px;
+}
+
+.barValue {
+  min-width: 40px;
+  text-align: right;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Scores */
+.scoresCard {
+  padding: var(--space-6);
+}
+
+.scoresList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.scoreItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.scoreRank {
+  font-size: var(--fs-xl);
+  font-weight: 800;
+  color: var(--accent-tertiary);
+  min-width: 40px;
+}
+
+.scoreInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.scoreName {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.scoreValue {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  color: var(--accent-primary);
+  min-width: 50px;
+  text-align: right;
+}
+
+/* Recommendation */
+.recommendation {
+  padding: var(--space-6);
+  border-left: 4px solid var(--accent-primary);
+}
+
+.recText {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+@media (max-width: 768px) {
+  .dimensionRow {
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .dimLabel {
+    min-width: unset;
+  }
+
+  .barLabel {
+    min-width: 80px;
+    font-size: 11px;
+  }
+
+  .ideaChips {
+    flex-direction: column;
+  }
+}

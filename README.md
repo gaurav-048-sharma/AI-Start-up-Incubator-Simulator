@@ -45,6 +45,31 @@ npm run dev
 - Backend API: http://localhost:8000
 - API Docs: http://localhost:8000/docs (debug mode)
 
+## Features
+
+### Core Platform
+- **5 AI Research Agents** — Market Analyst, Tech Architect, Growth Strategist, Financial Analyst, Legal Advisor
+- **LangGraph Workflow Engine** — 6-node state machine with quality gates and retry loops
+- **Investor Pitch Simulation** — Multi-round AI investor personas with funding verdicts
+- **Real-time Updates** — WebSocket-powered live agent activity and workflow tracking
+
+### Dashboard
+- **Overview** — Stats, quick actions, service health, recent ideas
+- **Ideas CRUD** — Submit, track, and manage startup ideas
+- **Agent Monitor** — Real-time agent activity tracking
+- **Workflow Visualizer** — Interactive graph with live progress
+- **Reports** — View and explore AI-generated analysis reports
+- **Compare Ideas** — Side-by-side multi-dimension comparison with radar charts
+- **Settings** — LLM provider selection, notification preferences, webhook config
+
+### Enterprise Features
+- **Analytics & Usage Tracking** — Token usage, cost reporting, credit management
+- **In-App Notifications** — Workflow/simulation completion alerts with bell dropdown
+- **Webhook Integration** — Slack/Discord/custom webhooks on workflow events
+- **Stripe Billing** — Free, Pro, Enterprise tiers with feature gating
+- **RBAC & Feature Flags** — Tier-based access control per feature
+- **Security Middleware** — Rate limiting, JWT auth, request tracing
+
 ## Project Structure
 
 ```
@@ -58,7 +83,7 @@ npm run dev
 │       ├── api/       # REST + WebSocket routes
 │       ├── tools/     # Search, financial, code tools
 │       ├── models/    # Pydantic schemas + DB client
-│       └── services/  # LLM + Storage services
+│       └── services/  # LLM, Analytics, Notifications
 ├── supabase/          # Database migrations
 └── docker-compose.yml # Local dev orchestration
 ```
@@ -81,10 +106,25 @@ Research → Quality Gate → Plan → Build → Simulate → Complete
    └── retry ←──────┘  (if quality < 0.7)
 ```
 
+## API Endpoints
+
+| Module | Prefix | Key Endpoints |
+|--------|--------|---------------|
+| Ideas | `/api/ideas` | CRUD, launch workflow, compare |
+| Agents | `/api/agents` | Roles, activity logs |
+| Workflows | `/api/workflows` | Graph structure, state tracking |
+| Reports | `/api/reports` | List, view, export |
+| Simulations | `/api/simulations` | Start pitch, view results |
+| Analytics | `/api/analytics` | Usage summary, credits, cost |
+| Notifications | `/api/notifications` | List, unread count, mark read |
+| Settings | `/api/settings` | Get/update user preferences |
+| Billing | `/api/billing` | Plans, checkout, webhooks |
+
 ## Tech Stack
 
-- **Frontend**: Next.js 16, TypeScript, CSS Modules
-- **Backend**: FastAPI, Python 3.12
+- **Frontend**: Next.js 16, TypeScript, CSS Modules (Glassmorphism design system)
+- **Backend**: FastAPI, Python 3.12, Pydantic v2
 - **AI**: CrewAI, LangGraph, AutoGen, OpenAI/Anthropic
 - **Database**: Supabase (PostgreSQL + Auth + Realtime + Storage)
+- **Infrastructure**: Docker Compose, Redis, Prometheus, Grafana
 - **Deployment**: Vercel (frontend) + Railway (backend)

@@ -115,9 +115,24 @@ async def launch_incubation(idea_id: str, background_tasks: BackgroundTasks):
 async def _run_workflow_background(idea: dict, idea_id: str):
     """Background task to run the full incubation workflow."""
     db = get_db_service()
+    user_id = idea.get("user_id", "demo-user")
+
+    # Track usage event
+    try:
+        from app.services.analytics import get_analytics_service
+        analytics = get_analytics_service()
+        await analytics.track_event(
+            user_id=user_id,
+            event_type="workflow_run",
+            idea_id=idea_id,
+            metadata={"idea_title": idea.get("title", "")},
+        )
+    except Exception as e:
+        logger.warning("Analytics tracking skipped", error=str(e))
+
     try:
         await db.update_idea(idea_id, {"status": "researching", "progress": 10})
-        result = await run_incubation_workflow(idea, idea.get("user_id", "demo-user"))
+        result = await run_incubation_workflow(idea, user_id)
 
         # Save reports
         for report in result.get("reports", []):
@@ -129,13 +144,47 @@ async def _run_workflow_background(idea: dict, idea_id: str):
             }
             await db.create_report(report_data)
 
+        final_status = result.get("status", "completed")
         await db.update_idea(idea_id, {
-            "status": result.get("status", "completed"),
+            "status": final_status,
             "progress": 100,
             "current_phase": result.get("current_phase", "completed"),
         })
+
+        # Send completion notification
+        try:
+            from app.services.notifications import get_notification_service
+            notif = get_notification_service()
+            await notif.notify_workflow_complete(
+                user_id=user_id,
+                idea_id=idea_id,
+                idea_title=idea.get("title", "Untitled"),
+                status=final_status,
+            )
+
+            # Check if credits are low after deduction
+            from app.services.analytics import get_analytics_service
+            analytics = get_analytics_service()
+            remaining = await analytics.get_user_credits(user_id)
+            await notif.notify_credits_low(user_id, remaining)
+        except Exception as e:
+            logger.warning("Notification dispatch skipped", error=str(e))
 
         logger.info("Background workflow completed", idea_id=idea_id)
     except Exception as e:
         logger.error("Background workflow failed", idea_id=idea_id, error=str(e))
         await db.update_idea(idea_id, {"status": "failed", "progress": 0})
+
+        # Notify about failure
+        try:
+            from app.services.notifications import get_notification_service
+            notif = get_notification_service()
+            await notif.notify_workflow_complete(
+                user_id=user_id,
+                idea_id=idea_id,
+                idea_title=idea.get("title", "Untitled"),
+                status="failed",
+            )
+        except Exception:
+            pass
+

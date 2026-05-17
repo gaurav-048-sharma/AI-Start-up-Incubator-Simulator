@@ -1,46 +1,20 @@
-.authPage {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-6);
-  position: relative;
-  z-index: 1;
-}
+/* Signup shares the same auth styles as login */
+@import url('../login/auth.module.css');
 
-.authCard {
-  width: 100%;
-  max-width: 420px;
-  padding: var(--space-10);
-  text-align: center;
-}
-
-.logo {
-  font-size: 2.5rem;
-  margin-bottom: var(--space-4);
-}
-
-.title {
-  font-size: var(--fs-2xl);
-  font-weight: 700;
-  margin-bottom: var(--space-2);
-}
-
-.subtitle {
-  font-size: var(--fs-sm);
-  color: var(--text-secondary);
-  margin-bottom: var(--space-8);
-}
-
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  text-align: left;
-}
-
-.altLink {
-  margin-top: var(--space-6);
-  font-size: var(--fs-sm);
-  color: var(--text-tertiary);
-}
+/* Re-export all classes so CSS modules picks them up */
+.authPage { composes: authPage from '../login/auth.module.css'; }
+.authCard { composes: authCard from '../login/auth.module.css'; }
+.logoContainer { composes: logoContainer from '../login/auth.module.css'; }
+.logo { composes: logo from '../login/auth.module.css'; }
+.logoGlow { composes: logoGlow from '../login/auth.module.css'; }
+.title { composes: title from '../login/auth.module.css'; }
+.subtitle { composes: subtitle from '../login/auth.module.css'; }
+.errorBanner { composes: errorBanner from '../login/auth.module.css'; }
+.form { composes: form from '../login/auth.module.css'; }
+.fieldGroup { composes: fieldGroup from '../login/auth.module.css'; }
+.altLink { composes: altLink from '../login/auth.module.css'; }
+.terms { composes: terms from '../login/auth.module.css'; }
+.orbTop { composes: orbTop from '../login/auth.module.css'; }
+.orbBottom { composes: orbBottom from '../login/auth.module.css'; }
+.passwordStrength { composes: passwordStrength from '../login/auth.module.css'; }
+.passwordBar { composes: passwordBar from '../login/auth.module.css'; }

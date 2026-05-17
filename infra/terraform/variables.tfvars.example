@@ -1,0 +1,6 @@
+# Copy to variables.tfvars and fill in values
+vercel_api_token  = ""
+project_name      = "ai-incubator"
+supabase_url      = ""
+supabase_anon_key = ""
+backend_url       = "https://api.yourdomain.com"

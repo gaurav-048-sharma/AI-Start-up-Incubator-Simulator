@@ -1,7 +1,123 @@
-.wrapper { max-width: 720px; display: flex; flex-direction: column; gap: var(--space-6); }
-.section { padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); }
-.sectionTitle { font-size: var(--fs-base); font-weight: 600; }
-.sectionDesc { font-size: var(--fs-sm); color: var(--text-tertiary); margin-top: calc(-1 * var(--space-2)); }
-.fieldGroup { display: flex; flex-direction: column; }
-.fieldRow { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); }
-@media (max-width: 768px) { .fieldRow { grid-template-columns: 1fr; } }
+/* ── Settings Page ─────────────────────────────────────────────── */
+
+.wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 720px;
+}
+
+.creditsBanner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-5) var(--space-6);
+  background: linear-gradient(135deg, var(--bg-glass), rgba(99, 102, 241, 0.08));
+  border: 1px solid var(--border-accent);
+}
+
+.creditsInfo {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.creditsIcon {
+  font-size: 2rem;
+}
+
+.creditsValue {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  color: var(--accent-tertiary);
+}
+
+.creditsLabel {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.creditsActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.section {
+  padding: var(--space-6);
+}
+
+.sectionTitle {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  margin-bottom: var(--space-1);
+}
+
+.sectionDesc {
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-5);
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+}
+
+.fieldRow {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.toggleGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.toggleRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.toggleRow:hover {
+  background: var(--bg-elevated);
+}
+
+.toggleRow input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+.saveRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-4);
+}
+
+@media (max-width: 640px) {
+  .fieldRow {
+    flex-direction: column;
+  }
+
+  .creditsBanner {
+    flex-direction: column;
+    gap: var(--space-3);
+    text-align: center;
+  }
+}

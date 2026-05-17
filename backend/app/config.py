@@ -64,6 +64,29 @@ class Settings(BaseSettings):
     simulation_max_rounds: int = 8
     num_investor_agents: int = 3
 
+    # ── Redis / Caching ──────────────────────────────────────────
+    redis_url: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")
+
+    # ── Rate Limiting ────────────────────────────────────────────
+    rate_limit_rpm: int = Field(default=60, description="API requests per minute per IP")
+
+    # ── Stripe Billing ───────────────────────────────────────────
+    stripe_secret_key: str = Field(default="", description="Stripe secret key")
+    stripe_webhook_secret: str = Field(default="", description="Stripe webhook signing secret")
+    stripe_price_pro: str = Field(default="", description="Stripe Price ID for Pro tier")
+    stripe_price_enterprise: str = Field(default="", description="Stripe Price ID for Enterprise tier")
+
+    # ── Monitoring ───────────────────────────────────────────────
+    sentry_dsn: str = Field(default="", description="Sentry DSN for error tracking")
+
+    # ── SMTP / Mailer ────────────────────────────────────────────
+    smtp_host: str = Field(default="", description="SMTP host server")
+    smtp_port: int = Field(default=465, description="SMTP port")
+    smtp_username: str = Field(default="", description="SMTP username")
+    smtp_password: str = Field(default="", description="SMTP password")
+    smtp_from_email: str = Field(default="noreply@ai-incubator.com", description="From email address")
+    frontend_url: str = Field(default="http://localhost:3000", description="Frontend base URL for links")
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",")]

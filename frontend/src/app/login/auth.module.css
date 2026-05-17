@@ -1,3 +1,5 @@
+/* ── Auth Pages — Premium Glassmorphism ───────────────────────── */
+
 .authPage {
   min-height: 100vh;
   display: flex;
@@ -6,30 +8,100 @@
   padding: var(--space-6);
   position: relative;
   z-index: 1;
+  overflow: hidden;
+}
+
+/* Floating ambient orbs */
+.orbTop {
+  position: fixed;
+  top: -120px;
+  right: -80px;
+  width: 400px;
+  height: 400px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, transparent 70%);
+  filter: blur(60px);
+  animation: float 8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.orbBottom {
+  position: fixed;
+  bottom: -100px;
+  left: -60px;
+  width: 350px;
+  height: 350px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
+  filter: blur(50px);
+  animation: float 10s ease-in-out infinite reverse;
+  pointer-events: none;
 }
 
 .authCard {
   width: 100%;
-  max-width: 420px;
-  padding: var(--space-10);
+  max-width: 440px;
+  padding: var(--space-10) var(--space-8);
   text-align: center;
+  position: relative;
+}
+
+.logoContainer {
+  position: relative;
+  display: inline-block;
+  margin-bottom: var(--space-5);
 }
 
 .logo {
-  font-size: 2.5rem;
-  margin-bottom: var(--space-4);
+  font-size: 3rem;
+  position: relative;
+  z-index: 2;
+  animation: float 4s ease-in-out infinite;
+}
+
+.logoGlow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+  filter: blur(15px);
+  z-index: 1;
+  animation: pulse-glow 3s ease-in-out infinite;
 }
 
 .title {
   font-size: var(--fs-2xl);
   font-weight: 700;
   margin-bottom: var(--space-2);
+  background: var(--accent-gradient-vivid);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .subtitle {
   font-size: var(--fs-sm);
   color: var(--text-secondary);
-  margin-bottom: var(--space-8);
+  margin-bottom: var(--space-6);
+  line-height: 1.5;
+}
+
+.errorBanner {
+  padding: var(--space-3) var(--space-4);
+  background: var(--error-soft);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--error);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: left;
 }
 
 .form {
@@ -39,8 +111,104 @@
   text-align: left;
 }
 
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.labelRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.forgotLink {
+  font-size: var(--fs-xs);
+  color: var(--accent-tertiary);
+  text-decoration: none;
+}
+
+.forgotLink:hover {
+  text-decoration: underline;
+}
+
+.passwordStrength {
+  height: 3px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  margin-top: var(--space-1);
+}
+
+.passwordBar {
+  height: 100%;
+  border-radius: var(--radius-full);
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin: var(--space-5) 0;
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-default);
+}
+
+.demoBtn {
+  width: 100%;
+  justify-content: center;
+}
+
 .altLink {
-  margin-top: var(--space-6);
+  margin-top: var(--space-5);
   font-size: var(--fs-sm);
   color: var(--text-tertiary);
+}
+
+.terms {
+  margin-top: var(--space-4);
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.features {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-5);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.featureItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-xs);
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 480px) {
+  .authCard {
+    padding: var(--space-6) var(--space-5);
+  }
+
+  .features {
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-2);
+  }
 }

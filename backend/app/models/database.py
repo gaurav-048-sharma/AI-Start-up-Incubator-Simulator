@@ -14,15 +14,14 @@ logger = structlog.get_logger()
 _supabase_client: Optional[Client] = None
 
 
-def get_supabase_client() -> Client:
+def get_supabase_client() -> Optional[Client]:
     """Get or create the Supabase client singleton."""
     global _supabase_client
     if _supabase_client is None:
         settings = get_settings()
         if not settings.has_supabase:
             logger.warning("Supabase not configured — using mock mode")
-            # Return a client that will fail gracefully
-            # In production, this should raise an error
+            return None
         _supabase_client = create_client(
             settings.supabase_url,
             settings.supabase_service_role_key or settings.supabase_anon_key,

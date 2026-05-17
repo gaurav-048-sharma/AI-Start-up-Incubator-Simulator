@@ -1,0 +1,18 @@
+# Prometheus configuration for AI Incubator monitoring
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "ai-incubator-backend"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8000"]
+        labels:
+          service: "api"
+
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis:6379"]
+        labels:
+          service: "cache"

@@ -74,6 +74,88 @@ export const simulationsApi = {
     apiRequest<{ simulations: Simulation[] }>(`/api/simulations/ideas/${ideaId}/list`),
 };
 
+// ── Analytics API ────────────────────────────────────────────────
+export const analyticsApi = {
+  getUsage: (days: number = 30) =>
+    apiRequest<UsageSummary>(`/api/analytics/usage?days=${days}`),
+  getCredits: () =>
+    apiRequest<{ credits: number; user_id: string }>("/api/analytics/credits"),
+  checkCredits: (eventType: string) =>
+    apiRequest<{ has_credits: boolean; required: number }>(`/api/analytics/credits/check?event_type=${eventType}`),
+};
+
+// ── Notifications API ────────────────────────────────────────────
+export const notificationsApi = {
+  list: (unreadOnly: boolean = false) =>
+    apiRequest<{ notifications: Notification[]; unread_count: number; total: number }>(
+      `/api/notifications?unread_only=${unreadOnly}`
+    ),
+  getUnreadCount: () =>
+    apiRequest<{ unread_count: number }>("/api/notifications/unread-count"),
+  markRead: (id: string) =>
+    apiRequest<{ success: boolean }>(`/api/notifications/${id}/read`, { method: "PATCH" }),
+  markAllRead: () =>
+    apiRequest<{ success: boolean }>("/api/notifications/mark-all-read", { method: "POST" }),
+  delete: (id: string) =>
+    apiRequest<{ success: boolean }>(`/api/notifications/${id}`, { method: "DELETE" }),
+};
+
+// ── Settings API ─────────────────────────────────────────────────
+export const settingsApi = {
+  get: () => apiRequest<UserSettings>("/api/settings"),
+  update: (data: Partial<UserSettings>) =>
+    apiRequest<UserSettings>("/api/settings", { method: "PATCH", body: data }),
+};
+
+// ── Comparison API ───────────────────────────────────────────────
+export const comparisonApi = {
+  compare: (ideaIds: string[]) =>
+    apiRequest<ComparisonResult>("/api/ideas/compare", {
+      method: "POST",
+      body: { idea_ids: ideaIds },
+    }),
+};
+
+// ── Organizations API ────────────────────────────────────────────
+export const organizationsApi = {
+  list: () =>
+    apiRequest<{ organizations: Organization[] }>("/api/organizations"),
+  get: (orgId: string) =>
+    apiRequest<Organization>(`/api/organizations/${orgId}`),
+  create: (name: string, slug: string) =>
+    apiRequest<Organization>("/api/organizations", {
+      method: "POST",
+      body: { name, slug },
+    }),
+  getRoles: () =>
+    apiRequest<{ roles: RoleInfo[] }>("/api/organizations/roles"),
+  getMembers: (orgId: string) =>
+    apiRequest<{ members: OrgMember[] }>(`/api/organizations/${orgId}/members`),
+  updateMemberRole: (orgId: string, userId: string, role: string) =>
+    apiRequest<{ success: boolean }>(`/api/organizations/${orgId}/members/${userId}/role`, {
+      method: "PATCH",
+      body: { role },
+    }),
+  removeMember: (orgId: string, userId: string) =>
+    apiRequest<{ success: boolean }>(`/api/organizations/${orgId}/members/${userId}`, {
+      method: "DELETE",
+    }),
+  invite: (orgId: string, email: string, role: string) =>
+    apiRequest<{ invitation_id: string; token: string; invite_url: string }>(
+      `/api/organizations/${orgId}/invitations`,
+      { method: "POST", body: { email, role } }
+    ),
+  acceptInvite: (token: string) =>
+    apiRequest<{ success: boolean; organization_id: string }>(
+      `/api/organizations/invitations/${token}/accept`,
+      { method: "POST" }
+    ),
+  getAuditLog: (orgId: string, limit: number = 50) =>
+    apiRequest<{ audit_log: AuditEntry[]; total: number }>(
+      `/api/organizations/${orgId}/audit?limit=${limit}`
+    ),
+};
+
 // ── Types ────────────────────────────────────────────────────────
 export interface Idea {
   id: string;
@@ -161,4 +243,91 @@ export interface Simulation {
   feedback?: Record<string, unknown>;
   started_at: string;
   completed_at?: string;
+}
+
+export interface UsageSummary {
+  total_events: number;
+  total_tokens: number;
+  total_cost_usd: number;
+  events_by_type: Record<string, number>;
+  daily_usage: { date: string; events: number; tokens: number; cost: number }[];
+  period_days: number;
+}
+
+export interface Notification {
+  id: string;
+  user_id: string;
+  title: string;
+  body?: string;
+  notification_type: string;
+  is_read: boolean;
+  action_url?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface UserSettings {
+  user_id: string;
+  llm_provider: string;
+  llm_model: string;
+  max_iterations: number;
+  quality_threshold: number;
+  notification_email: boolean;
+  notification_in_app: boolean;
+  webhook_url?: string;
+  theme: string;
+  updated_at?: string;
+}
+
+export interface ComparisonResult {
+  ideas: { id: string; title: string; industry?: string; status: string; progress: number }[];
+  dimensions: {
+    dimension: string;
+    label: string;
+    scores: Record<string, number>;
+  }[];
+  recommendation?: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url?: string;
+  plan: string;
+  owner_id?: string;
+  max_members: number;
+  max_ideas: number;
+  member_count?: number;
+  my_role?: string;
+  is_owner?: boolean;
+  created_at: string;
+}
+
+export interface OrgMember {
+  id: string;
+  user_id: string;
+  role: string;
+  full_name?: string;
+  avatar_url?: string;
+  joined_at: string;
+}
+
+export interface RoleInfo {
+  id: string;
+  label: string;
+  level: number;
+  description: string;
+}
+
+export interface AuditEntry {
+  id: string;
+  user_id: string;
+  organization_id?: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string;
+  details: Record<string, unknown>;
+  ip_address?: string;
+  created_at: string;
 }

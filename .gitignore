@@ -101,4 +101,20 @@ temp/
 # Uncomment if you don't want to track generated outputs
 # outputs/
 
+# ── Terraform ────────────────────────────────────────────────────
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
 
+# ── Data & Volumes ───────────────────────────────────────────────
+infra/docker/prometheus_data/
+infra/docker/redis_data/
+postgres_data/

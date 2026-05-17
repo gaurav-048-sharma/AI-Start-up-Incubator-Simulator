@@ -23,6 +23,25 @@ class IdeaStatus(str, Enum):
     FAILED = "failed"
 
 
+class UserRole(str, Enum):
+    """Platform-wide user roles with hierarchy."""
+    VIEWER = "viewer"
+    TEAM_MEMBER = "team_member"
+    FOUNDER = "founder"
+    INVESTOR_ADVISOR = "investor_advisor"
+    INNOVATION_LEAD = "innovation_lead"
+    INCUBATOR_MANAGER = "incubator_manager"
+    ADMIN = "admin"
+    SUPER_ADMIN = "super_admin"
+
+
+class SubscriptionTier(str, Enum):
+    """Billing subscription tiers."""
+    FREE = "free"
+    PRO = "pro"
+    ENTERPRISE = "enterprise"
+
+
 class AgentRole(str, Enum):
     MARKET_ANALYST = "market_analyst"
     TECH_ARCHITECT = "tech_architect"
@@ -100,9 +119,43 @@ class ProfileResponse(BaseModel):
     avatar_url: Optional[str] = None
     company_name: Optional[str] = None
     role: str = "founder"
+    tier: str = "free"
     credits: int = 10
+    current_org_id: Optional[Union[str, UUID]] = None
+    org_role: Optional[str] = None
+    total_ideas_created: int = 0
+    total_workflows_run: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+class OrganizationResponse(BaseModel):
+    """Organization response."""
+    id: Union[str, UUID]
+    name: str
+    slug: str
+    logo_url: Optional[str] = None
+    plan: str = "free"
+    owner_id: Optional[Union[str, UUID]] = None
+    max_members: int = 5
+    max_ideas: int = 20
+    sso_provider: Optional[str] = None
+    sso_entity_id: Optional[str] = None
+    sso_acs_url: Optional[str] = None
+    sso_enforced: bool = False
+    member_count: Optional[int] = None
+    my_role: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+
+class OrganizationMemberResponse(BaseModel):
+    """Organization member response."""
+    id: Union[str, UUID]
+    user_id: Union[str, UUID]
+    role: str
+    full_name: Optional[str] = None
+    avatar_url: Optional[str] = None
+    joined_at: Optional[datetime] = None
 
 
 class IdeaResponse(BaseModel):

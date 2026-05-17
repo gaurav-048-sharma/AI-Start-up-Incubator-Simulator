@@ -1,8 +1,10 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import styles from "./layout.module.css";
+import { notificationsApi, analyticsApi, type Notification as AppNotification } from "@/lib/api";
 
 const NAV_ITEMS = [
   { href: "/dashboard", icon: "📊", label: "Overview" },
@@ -15,9 +17,11 @@ const NAV_TOOLS = [
   { href: "/dashboard/workflows", icon: "🔄", label: "Workflows" },
   { href: "/dashboard/reports", icon: "📄", label: "Reports" },
   { href: "/dashboard/simulation", icon: "🎯", label: "Pitch Simulation" },
+  { href: "/dashboard/compare", icon: "⚖️", label: "Compare Ideas" },
 ];
 
 const NAV_SETTINGS = [
+  { href: "/dashboard/team", icon: "👥", label: "Team & Org" },
   { href: "/dashboard/settings", icon: "⚙️", label: "Settings" },
 ];
 
@@ -27,6 +31,62 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [credits, setCredits] = useState<number | null>(null);
+  const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+
+  useEffect(() => {
+    async function loadHeader() {
+      try {
+        const [notifData, creditsData] = await Promise.allSettled([
+          notificationsApi.getUnreadCount(),
+          analyticsApi.getCredits(),
+        ]);
+        if (notifData.status === "fulfilled") setUnreadCount(notifData.value.unread_count);
+        if (creditsData.status === "fulfilled") setCredits(creditsData.value.credits);
+      } catch {
+        /* backend may not be connected */
+      }
+    }
+    loadHeader();
+
+    // Poll every 30s for notification updates
+    const interval = setInterval(loadHeader, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleBellClick = async () => {
+    setShowNotifDropdown((prev) => !prev);
+    if (!showNotifDropdown) {
+      try {
+        const data = await notificationsApi.list();
+        setNotifications(data.notifications.slice(0, 5));
+      } catch {
+        /* empty */
+      }
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await notificationsApi.markAllRead();
+      setUnreadCount(0);
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+    } catch {
+      /* empty */
+    }
+  };
+
+  const handleNotifClick = async (notif: AppNotification) => {
+    if (!notif.is_read) {
+      await notificationsApi.markRead(notif.id).catch(() => {});
+      setUnreadCount((c) => Math.max(0, c - 1));
+    }
+    setShowNotifDropdown(false);
+    if (notif.action_url) router.push(notif.action_url);
+  };
 
   return (
     <div className={styles.dashboardLayout}>
@@ -89,7 +149,9 @@ export default function DashboardLayout({
             <div className={styles.userAvatar}>👤</div>
             <div>
               <div className={styles.userName}>Founder</div>
-              <div className={styles.userRole}>Free Plan · 10 credits</div>
+              <div className={styles.userRole}>
+                Free Plan · {credits !== null ? credits : "—"} credits
+              </div>
             </div>
           </div>
         </div>
@@ -102,6 +164,51 @@ export default function DashboardLayout({
             {getPageTitle(pathname)}
           </div>
           <div className={styles.headerActions}>
+            {/* Notification Bell */}
+            <div className={styles.notifWrapper}>
+              <button
+                className={styles.notifBell}
+                onClick={handleBellClick}
+                id="notification-bell"
+                aria-label="Notifications"
+              >
+                🔔
+                {unreadCount > 0 && (
+                  <span className={styles.notifBadge}>{unreadCount > 9 ? "9+" : unreadCount}</span>
+                )}
+              </button>
+
+              {showNotifDropdown && (
+                <div className={`${styles.notifDropdown} glass-card`}>
+                  <div className={styles.notifDropdownHeader}>
+                    <span>Notifications</span>
+                    {unreadCount > 0 && (
+                      <button className="btn btn-ghost btn-sm" onClick={handleMarkAllRead}>
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+                  {notifications.length === 0 ? (
+                    <div className={styles.notifEmpty}>No notifications yet</div>
+                  ) : (
+                    notifications.map((n) => (
+                      <button
+                        key={n.id}
+                        className={`${styles.notifItem} ${!n.is_read ? styles.notifUnread : ""}`}
+                        onClick={() => handleNotifClick(n)}
+                      >
+                        <div className={styles.notifTitle}>{n.title}</div>
+                        {n.body && <div className={styles.notifBody}>{n.body}</div>}
+                        <div className={styles.notifTime}>
+                          {new Date(n.created_at).toLocaleDateString()}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
             <Link href="/dashboard/ideas/new" className="btn btn-primary btn-sm" id="header-new-idea">
               ✨ New Idea
             </Link>
@@ -123,6 +230,8 @@ function getPageTitle(pathname: string): string {
     "/dashboard/workflows": "Workflow Visualizer",
     "/dashboard/reports": "Reports",
     "/dashboard/simulation": "Investor Pitch Simulation",
+    "/dashboard/compare": "Compare Ideas",
+    "/dashboard/team": "Team & Organization",
     "/dashboard/settings": "Settings",
   };
   return titles[pathname] || "Dashboard";
