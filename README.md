@@ -1,6 +1,8 @@
 # 🚀 AI Start-up Incubator Simulator
 
 A full-stack AI-powered startup accelerator where autonomous agents research, validate, and pitch your startup ideas.
+This project is an AI Venture Operating System—a SaaS platform that acts like an AI-powered startup accelerator or virtual co-founder. Users submit a startup or business idea, and the system uses specialized AI agents to automatically perform market research, competitor analysis, technical architecture planning, financial forecasting, legal checks, growth strategy creation, and investor pitch simulations. Instead of founders needing separate consultants, analysts, advisors, and strategists, this platform centralizes the entire startup validation and planning process into one intelligent system.
+
 
 ## Architecture
 
