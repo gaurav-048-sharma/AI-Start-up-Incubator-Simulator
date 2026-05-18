@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./layout.module.css";
 import { notificationsApi, analyticsApi, type Notification as AppNotification } from "@/lib/api";
+import { useAuth } from "@/components/AuthProvider";
 
 const NAV_ITEMS = [
   { href: "/dashboard", icon: "📊", label: "Overview" },
@@ -32,6 +33,7 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { user, signOut } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [credits, setCredits] = useState<number | null>(null);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
@@ -145,14 +147,26 @@ export default function DashboardLayout({
         </nav>
 
         <div className={styles.sidebarFooter}>
-          <div className={styles.userCard}>
-            <div className={styles.userAvatar}>👤</div>
-            <div>
-              <div className={styles.userName}>Founder</div>
-              <div className={styles.userRole}>
-                Free Plan · {credits !== null ? credits : "—"} credits
+          <div className={styles.userCard} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <div className={styles.userAvatar}>{user?.user_metadata?.avatar_url ? <img src={user.user_metadata.avatar_url} alt="Avatar" style={{width: 32, height: 32, borderRadius: "50%"}} /> : "👤"}</div>
+              <div>
+                <div className={styles.userName} style={{ maxWidth: "100px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {user?.user_metadata?.full_name || user?.email || "Founder"}
+                </div>
+                <div className={styles.userRole}>
+                  Free Plan · {credits !== null ? credits : "—"} credits
+                </div>
               </div>
             </div>
+            <button 
+              onClick={signOut} 
+              className="btn btn-ghost btn-sm" 
+              style={{ padding: "0.25rem 0.5rem", fontSize: "1.2rem", color: "#888" }}
+              title="Sign Out"
+            >
+              🚪
+            </button>
           </div>
         </div>
       </aside>

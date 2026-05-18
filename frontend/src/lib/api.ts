@@ -6,7 +6,7 @@ interface ApiOptions {
   headers?: Record<string, string>;
 }
 
-async function apiRequest<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
+export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
   const { method = "GET", body, headers = {} } = options;
 
   const config: RequestInit = {
@@ -16,6 +16,20 @@ async function apiRequest<T>(endpoint: string, options: ApiOptions = {}): Promis
       ...headers,
     },
   };
+
+  // Try to inject Supabase JWT if client is available
+  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    try {
+      const { createClient } = await import("./supabase/client");
+      const supabase = createClient();
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        (config.headers as Record<string, string>)["Authorization"] = `Bearer ${data.session.access_token}`;
+      }
+    } catch {
+      // Ignore
+    }
+  }
 
   if (body) {
     config.body = JSON.stringify(body);

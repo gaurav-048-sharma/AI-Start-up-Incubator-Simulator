@@ -2,11 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import styles from "./auth.module.css";
 
 export default function SignupPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextUrl = searchParams.get("next") || "/dashboard";
+
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -34,7 +37,7 @@ export default function SignupPage() {
           email,
           password,
           options: {
-            data: { full_name: name, role: "founder" },
+            data: { full_name: name, role: "founder_product_lead" },
           },
         });
         if (authError) {
@@ -45,9 +48,9 @@ export default function SignupPage() {
         setSuccess(true);
         return;
       }
-      router.push("/dashboard");
+      router.push(nextUrl);
     } catch {
-      router.push("/dashboard");
+      router.push(nextUrl);
     } finally {
       setLoading(false);
     }
@@ -166,6 +169,11 @@ export default function SignupPage() {
         <p className={styles.altLink}>
           Already have an account?{" "}
           <Link href="/login">Sign In</Link>
+        </p>
+
+        <p className={styles.altLink} style={{ marginTop: "var(--space-2)" }}>
+          Need a workspace for your team?{" "}
+          <Link href="/enterprise">Request Enterprise Access</Link>
         </p>
 
         <p className={styles.terms}>

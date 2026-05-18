@@ -2,11 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import styles from "./auth.module.css";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const nextUrl = searchParams.get("next") || "/dashboard";
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,17 +36,17 @@ export default function LoginPage() {
           return;
         }
       }
-      router.push("/dashboard");
+      router.push(nextUrl);
     } catch {
       // Fallback: allow demo login when Supabase is not configured
-      router.push("/dashboard");
+      router.push(nextUrl);
     } finally {
       setLoading(false);
     }
   };
 
   const handleDemoLogin = () => {
-    router.push("/dashboard");
+    router.push(nextUrl);
   };
 
   return (
@@ -83,7 +86,7 @@ export default function LoginPage() {
           <div className={styles.fieldGroup}>
             <div className={styles.labelRow}>
               <label className="input-label" htmlFor="login-password">Password</label>
-              <Link href="/login" className={styles.forgotLink}>Forgot?</Link>
+              <Link href="/reset-password" className={styles.forgotLink}>Forgot?</Link>
             </div>
             <input
               id="login-password"

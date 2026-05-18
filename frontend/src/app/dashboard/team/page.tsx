@@ -107,6 +107,14 @@ export default function TeamPage() {
       innovation_lead: "badge-accent",
       investor_advisor: "badge-info",
       founder: "badge-success",
+      founder_product_lead: "badge-success",
+      fullstack_engineer: "badge-primary",
+      backend_engineer: "badge-primary",
+      devops_engineer: "badge-primary",
+      ai_engineer: "badge-accent",
+      ui_ux_designer: "badge-secondary",
+      security_consultant: "badge-error",
+      growth_marketing_lead: "badge-info",
       team_member: "badge-info",
       viewer: "",
     };
@@ -206,9 +214,11 @@ export default function TeamPage() {
           <div className={`${styles.membersCard} glass-card`}>
             <div className={styles.membersHeader}>
               <h3 className={styles.sectionTitle}>Team Members</h3>
-              <button className="btn btn-primary" onClick={() => { setShowInvite(true); setInviteLink(""); }} id="invite-btn">
-                ✉️ Invite Member
-              </button>
+              {(selectedOrg.my_role === "admin" || selectedOrg.my_role === "super_admin" || selectedOrg.my_role === "incubator_manager") && (
+                <button className="btn btn-primary" onClick={() => { setShowInvite(true); setInviteLink(""); }} id="invite-btn">
+                  ✉️ Invite Member
+                </button>
+              )}
             </div>
 
             {members.length === 0 ? (
@@ -230,22 +240,30 @@ export default function TeamPage() {
                       <div className={styles.memberName}>{member.full_name || "Unknown"}</div>
                       <div className={styles.memberMeta}>Joined {new Date(member.joined_at).toLocaleDateString()}</div>
                     </div>
-                    <select
-                      className={styles.roleSelect}
-                      value={member.role}
-                      onChange={(e) => handleRoleChange(member.user_id, e.target.value)}
-                    >
-                      {roles.map((r) => (
-                        <option key={r.id} value={r.id}>{r.label}</option>
-                      ))}
-                    </select>
-                    <button
-                      className={styles.removeBtn}
-                      onClick={() => handleRemove(member.user_id)}
-                      title="Remove member"
-                    >
-                      ✕
-                    </button>
+                    {selectedOrg.my_role === "admin" || selectedOrg.my_role === "super_admin" || selectedOrg.my_role === "incubator_manager" ? (
+                      <>
+                        <select
+                          className={styles.roleSelect}
+                          value={member.role}
+                          onChange={(e) => handleRoleChange(member.user_id, e.target.value)}
+                        >
+                          {roles.map((r) => (
+                            <option key={r.id} value={r.id}>{r.label}</option>
+                          ))}
+                        </select>
+                        <button
+                          className={styles.removeBtn}
+                          onClick={() => handleRemove(member.user_id)}
+                          title="Remove member"
+                        >
+                          ✕
+                        </button>
+                      </>
+                    ) : (
+                      <span className={`badge ${getRoleBadgeClass(member.role)}`} style={{ marginLeft: "auto", marginRight: "var(--space-4)" }}>
+                        {member.role.replace(/_/g, " ")}
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>

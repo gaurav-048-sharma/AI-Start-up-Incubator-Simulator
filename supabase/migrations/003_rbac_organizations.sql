@@ -167,10 +167,10 @@ CREATE INDEX IF NOT EXISTS idx_org_slug ON organizations(slug);
 
 -- ── Functions ───────────────────────────────────────────────────
 -- Auto-create profile on signup
-CREATE OR REPLACE FUNCTION handle_new_user()
+CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO profiles (id, full_name, avatar_url, role)
+    INSERT INTO public.profiles (id, full_name, avatar_url, role)
     VALUES (
         NEW.id,
         NEW.raw_user_meta_data->>'full_name',
@@ -179,7 +179,7 @@ BEGIN
     );
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Trigger
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;

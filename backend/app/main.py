@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.api.routes import ideas, agents, workflows, simulation, reports
 from app.api.routes import analytics, notifications, settings as settings_routes, comparison
-from app.api.routes import organizations as org_routes
+from app.api.routes import organizations as org_routes, enterprise
 from app.api.websockets import router as ws_router
 from app.middleware.security import (
     RateLimitMiddleware,
@@ -115,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_routes.router, prefix="/api/settings", tags=["Settings"])
     app.include_router(comparison.router, prefix="/api/ideas", tags=["Comparison"])
     app.include_router(org_routes.router, prefix="/api/organizations", tags=["Organizations"])
+    app.include_router(enterprise.router, prefix="/api/enterprise", tags=["Enterprise"])
     app.include_router(ws_router, tags=["WebSocket"])
 
     # ── Billing Routes (plans always available, checkout needs Stripe) ─

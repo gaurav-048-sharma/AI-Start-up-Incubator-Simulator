@@ -24,25 +24,41 @@ logger = structlog.get_logger()
 # ═══════════════════════════════════════════════════════════════════
 
 ROLE_HIERARCHY = {
-    "viewer":            10,
-    "team_member":       20,
-    "founder":           30,
-    "investor_advisor":  40,
-    "innovation_lead":   50,
-    "incubator_manager": 60,
-    "admin":             70,
-    "super_admin":       80,
+    "viewer":                10,
+    "team_member":           20,
+    "ui_ux_designer":        20,
+    "fullstack_engineer":    20,
+    "backend_engineer":      20,
+    "devops_engineer":       20,
+    "ai_engineer":           25,
+    "security_consultant":   25,
+    "growth_marketing_lead": 25,
+    "founder_product_lead":  30,
+    "founder":               30,
+    "investor_advisor":      40,
+    "innovation_lead":       50,
+    "incubator_manager":     60,
+    "admin":                 70,
+    "super_admin":           80,
 }
 
 ROLE_DESCRIPTIONS = {
-    "viewer":            "Read-only access to shared ideas and reports",
-    "team_member":       "Collaborate on ideas, view reports, contribute to workflows",
-    "founder":           "Full access to own ideas, simulations, reports, and subscriptions",
-    "investor_advisor":  "Review startup simulations, provide feedback, access pitch data",
-    "innovation_lead":   "Manage internal projects, organizational teams, white-label settings",
-    "incubator_manager": "Oversee cohorts, all startups, team performance, analytics dashboards",
-    "admin":             "Manage users, billing, feature flags, moderation, platform support",
-    "super_admin":       "Full platform operations, infrastructure, analytics, monetization",
+    "viewer":                "Read-only access to shared ideas and reports",
+    "team_member":           "Collaborate on ideas, view reports, contribute to workflows",
+    "ui_ux_designer":        "Focus on user experience, interfaces, and product design prototypes",
+    "fullstack_engineer":    "Build and deploy full-stack implementations of startup ideas",
+    "backend_engineer":      "Design backend architectures, databases, and APIs",
+    "devops_engineer":       "Manage deployments, infrastructure, and CI/CD pipelines",
+    "ai_engineer":           "Integrate ML models, design AI workflows and agent interactions",
+    "security_consultant":   "Review architectures for vulnerabilities and compliance",
+    "growth_marketing_lead": "Analyze market fit, growth strategies, and marketing reports",
+    "founder_product_lead":  "Lead product vision, manage own ideas, simulations, and team",
+    "founder":               "Full access to own ideas, simulations, reports, and subscriptions",
+    "investor_advisor":      "Review startup simulations, provide feedback, access pitch data",
+    "innovation_lead":       "Manage internal projects, organizational teams, white-label settings",
+    "incubator_manager":     "Oversee cohorts, all startups, team performance, analytics dashboards",
+    "admin":                 "Manage users, billing, feature flags, moderation, platform support",
+    "super_admin":           "Full platform operations, infrastructure, analytics, monetization",
 }
 
 # Which roles can perform which actions
@@ -53,6 +69,40 @@ ROLE_PERMISSIONS = {
     "team_member": [
         "view_ideas", "view_reports", "view_workflows",
         "create_idea", "edit_own_ideas", "view_agents",
+    ],
+    "ui_ux_designer": [
+        "view_ideas", "view_reports", "view_workflows",
+        "create_idea", "edit_own_ideas", "view_agents",
+    ],
+    "fullstack_engineer": [
+        "view_ideas", "view_reports", "view_workflows",
+        "create_idea", "edit_own_ideas", "view_agents",
+    ],
+    "backend_engineer": [
+        "view_ideas", "view_reports", "view_workflows",
+        "create_idea", "edit_own_ideas", "view_agents",
+    ],
+    "devops_engineer": [
+        "view_ideas", "view_reports", "view_workflows",
+        "view_agents", "view_analytics",
+    ],
+    "ai_engineer": [
+        "view_ideas", "view_reports", "view_workflows",
+        "create_idea", "edit_own_ideas", "view_agents", "run_simulation",
+    ],
+    "security_consultant": [
+        "view_ideas", "view_reports", "view_workflows",
+        "view_audit_log",
+    ],
+    "growth_marketing_lead": [
+        "view_ideas", "view_reports", "view_workflows",
+        "view_analytics", "export_reports",
+    ],
+    "founder_product_lead": [
+        "view_ideas", "view_reports", "view_workflows",
+        "create_idea", "edit_own_ideas", "view_agents",
+        "launch_workflow", "run_simulation", "view_analytics",
+        "manage_own_settings", "export_reports",
     ],
     "founder": [
         "view_ideas", "view_reports", "view_workflows",
@@ -242,22 +292,29 @@ async def get_current_user(
         user_role = user.user_metadata.get("role", "founder")
         user_tier = user.user_metadata.get("tier", "free")
 
-        # Fetch organization membership if exists
+        # Fetch organization membership and real profile role if exists
         org_id = None
         org_role = None
         try:
-            profile = supabase.table("profiles").select("current_org_id").eq("id", user_id).single().execute()
-            if profile.data and profile.data.get("current_org_id"):
-                org_id = profile.data["current_org_id"]
+            from app.models.database import get_db_service
+            db_client = get_db_service()._client
+            
+            profile = db_client.table("profiles").select("current_org_id, role").eq("id", user_id).single().execute()
+            if profile.data:
+                if profile.data.get("role"):
+                    user_role = profile.data["role"]
+                    
+                if profile.data.get("current_org_id"):
+                    org_id = profile.data["current_org_id"]
 
-                membership = (
-                    supabase.table("organization_members")
-                    .select("role")
-                    .eq("organization_id", org_id)
-                    .eq("user_id", user_id)
-                    .single()
-                    .execute()
-                )
+                    membership = (
+                        db_client.table("organization_members")
+                        .select("role")
+                        .eq("organization_id", org_id)
+                        .eq("user_id", user_id)
+                        .single()
+                        .execute()
+                    )
                 if membership.data:
                     org_role = membership.data["role"]
                     # Org role overrides user role if it's higher
