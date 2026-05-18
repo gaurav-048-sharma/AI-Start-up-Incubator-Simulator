@@ -131,7 +131,28 @@ async def run_incubation_workflow(idea: dict, user_id: str) -> dict:
 
     logger.info("Starting incubation workflow", idea_title=idea.get("title"))
 
-    final_state = await compiled_graph.ainvoke(initial_state)
+    from app.models.database import get_db_service
+    db = get_db_service()
+
+    progress_map = {
+        "research": {"progress": 25, "status": "researching"},
+        "validate": {"progress": 40, "status": "validating"},
+        "plan": {"progress": 60, "status": "planning"},
+        "build": {"progress": 80, "status": "planning"},
+        "simulate": {"progress": 95, "status": "simulating"},
+        "error_handler": {"progress": 100, "status": "failed"},
+    }
+
+    final_state = initial_state
+    
+    # Use stream_mode="updates" to get state updates after each node
+    async for output in compiled_graph.astream(initial_state, stream_mode="updates"):
+        for node_name, state_update in output.items():
+            final_state.update(state_update)
+            
+            if node_name in progress_map:
+                update_info = progress_map[node_name]
+                await db.update_idea(idea["id"], update_info)
 
     logger.info(
         "Incubation workflow completed",
@@ -139,5 +160,8 @@ async def run_incubation_workflow(idea: dict, user_id: str) -> dict:
         quality=final_state.get("overall_quality"),
         iterations=final_state.get("iteration"),
     )
+
+    # Ensure it always reaches 100% at the end
+    await db.update_idea(idea["id"], {"progress": 100, "status": final_state.get("status", "completed")})
 
     return dict(final_state)

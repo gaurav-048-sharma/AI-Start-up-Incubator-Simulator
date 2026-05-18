@@ -181,13 +181,13 @@ async def build_node(state: IncubatorState) -> dict:
 
         # Build report metadata
         reports = [
-            {"type": "market_analysis", "title": "Market Research Report", "status": "completed"},
+            {"type": "market_research", "title": "Market Research Report", "status": "completed"},
             {"type": "tech_architecture", "title": "Technical Architecture", "status": "completed"},
             {"type": "growth_strategy", "title": "Growth Strategy", "status": "completed"},
             {"type": "financial_projection", "title": "Financial Projections", "status": "completed"},
             {"type": "legal_review", "title": "Legal & IP Review", "status": "completed"},
             {"type": "executive_summary", "title": "Executive Summary", "status": "completed"},
-            {"type": "pitch_deck", "title": "Pitch Deck", "status": "completed"},
+            {"type": "pitch_deck_content", "title": "Pitch Deck", "status": "completed"},
         ]
 
         return {

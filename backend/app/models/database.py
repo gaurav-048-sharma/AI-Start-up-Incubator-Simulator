@@ -61,7 +61,10 @@ class DatabaseService:
     async def create_idea(self, idea_data: dict) -> Optional[dict]:
         """Create a new startup idea."""
         try:
-            result = self._client.table("ideas").insert(idea_data).execute()
+            import asyncio
+            result = await asyncio.to_thread(
+                lambda: self._client.table("ideas").insert(idea_data).execute()
+            )
             logger.info("Idea created", idea_id=result.data[0]["id"])
             return result.data[0]
         except Exception as e:
@@ -71,7 +74,10 @@ class DatabaseService:
     async def get_idea(self, idea_id: str) -> Optional[dict]:
         """Get a startup idea by ID."""
         try:
-            result = self._client.table("ideas").select("*").eq("id", idea_id).single().execute()
+            import asyncio
+            result = await asyncio.to_thread(
+                lambda: self._client.table("ideas").select("*").eq("id", idea_id).single().execute()
+            )
             return result.data
         except Exception as e:
             logger.error("Failed to get idea", idea_id=idea_id, error=str(e))
@@ -80,8 +86,9 @@ class DatabaseService:
     async def get_user_ideas(self, user_id: str) -> list[dict]:
         """Get all ideas for a user."""
         try:
-            result = (
-                self._client.table("ideas")
+            import asyncio
+            result = await asyncio.to_thread(
+                lambda: self._client.table("ideas")
                 .select("*")
                 .eq("user_id", user_id)
                 .order("created_at", desc=True)
@@ -95,7 +102,10 @@ class DatabaseService:
     async def update_idea(self, idea_id: str, data: dict) -> Optional[dict]:
         """Update a startup idea."""
         try:
-            result = self._client.table("ideas").update(data).eq("id", idea_id).execute()
+            import asyncio
+            result = await asyncio.to_thread(
+                lambda: self._client.table("ideas").update(data).eq("id", idea_id).execute()
+            )
             return result.data[0] if result.data else None
         except Exception as e:
             logger.error("Failed to update idea", idea_id=idea_id, error=str(e))

@@ -37,10 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!supabase) {
         if (mounted) {
           // Mock mode: bypass auth
-          import("@supabase/supabase-js").then(({ Session, User }) => {
-            setSession({} as unknown as typeof Session);
-            setUser({ id: "demo-user", email: "demo@incubator.ai", user_metadata: { role: "founder_product_lead", full_name: "Demo Founder" } } as unknown as typeof User);
-          });
+          setSession({} as unknown as Session);
+          setUser({ id: "demo-user", email: "demo@incubator.ai", user_metadata: { role: "founder_product_lead", full_name: "Demo Founder" } } as unknown as User);
           setIsLoading(false);
         }
         return;

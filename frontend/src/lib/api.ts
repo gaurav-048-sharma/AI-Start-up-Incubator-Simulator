@@ -22,9 +22,11 @@ export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}):
     try {
       const { createClient } = await import("./supabase/client");
       const supabase = createClient();
-      const { data } = await supabase.auth.getSession();
-      if (data?.session?.access_token) {
-        (config.headers as Record<string, string>)["Authorization"] = `Bearer ${data.session.access_token}`;
+      if (supabase) {
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.access_token) {
+          (config.headers as Record<string, string>)["Authorization"] = `Bearer ${data.session.access_token}`;
+        }
       }
     } catch {
       // Ignore

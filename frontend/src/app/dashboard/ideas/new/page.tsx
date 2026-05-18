@@ -13,6 +13,7 @@ export default function NewIdeaPage() {
     problem_statement: "", proposed_solution: "",
   });
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState("");
 
   const updateField = (field: string, value: string) => {
@@ -22,18 +23,33 @@ export default function NewIdeaPage() {
   const handleSubmit = async () => {
     setLoading(true);
     setError("");
+    setProgress(0);
+
+    // Simulate progress while backend works
+    const interval = setInterval(() => {
+      setProgress((prev) => (prev < 90 ? prev + Math.floor(Math.random() * 15) + 5 : prev));
+    }, 400);
+
     try {
       // Create the idea via backend API
       const idea = await ideasApi.create(form);
+      setProgress(50);
 
       // Launch the incubation workflow
       await ideasApi.launch(idea.id);
 
-      // Navigate to the idea detail page
-      router.push(`/dashboard/ideas/${idea.id}`);
+      setProgress(100);
+      clearInterval(interval);
+
+      // Brief delay so the user sees 100% completion before navigating
+      setTimeout(() => {
+        router.push(`/dashboard/ideas/${idea.id}`);
+      }, 500);
     } catch (err) {
+      clearInterval(interval);
       setError(err instanceof Error ? err.message : "Failed to create idea. Is the backend running?");
       setLoading(false);
+      setProgress(0);
     }
   };
 
@@ -134,12 +150,26 @@ export default function NewIdeaPage() {
               </ol>
             </div>
             <div className={styles.actions}>
-              <button className="btn btn-secondary" onClick={() => setStep(2)}>← Back</button>
-              {error && <div className={styles.errorMsg}>{error}</div>}
-              <button className="btn btn-primary btn-lg" onClick={handleSubmit} disabled={loading} id="launch-btn">
-                {loading ? (<><span className="loader" /> Launching...</>) : "🚀 Launch Incubation"}
-              </button>
+              {!loading && (
+                <>
+                  <button className="btn btn-secondary" onClick={() => setStep(2)}>← Back</button>
+                  {error && <div className={styles.errorMsg}>{error}</div>}
+                  <button className="btn btn-primary btn-lg" onClick={handleSubmit} id="launch-btn">
+                    🚀 Launch Incubation
+                  </button>
+                </>
+              )}
             </div>
+            {loading && (
+              <div className={styles.progressWrapper}>
+                <div className={styles.progressContainer}>
+                  <div className={styles.progressBar} style={{ width: `${Math.min(progress, 100)}%` }} />
+                </div>
+                <span className={styles.progressText}>
+                  {progress < 100 ? `Initializing AI Agents... ${progress}%` : "Redirecting to Dashboard..."}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>

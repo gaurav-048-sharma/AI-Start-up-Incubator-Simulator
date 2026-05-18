@@ -12,18 +12,20 @@ from app.models.schemas import (
 )
 from app.models.database import get_db_service
 from app.workflows.graph import run_incubation_workflow
+from app.middleware.security import get_current_user
+from fastapi import Depends
 
 logger = structlog.get_logger()
 router = APIRouter()
 
 
 @router.post("", response_model=IdeaResponse, status_code=201)
-async def create_idea(idea: IdeaCreate):
+async def create_idea(idea: IdeaCreate, user: dict = Depends(get_current_user)):
     """Create a new startup idea."""
     db = get_db_service()
     idea_data = {
         "id": str(uuid4()),
-        "user_id": "demo-user",  # TODO: Extract from auth
+        "user_id": user["id"],
         "title": idea.title,
         "description": idea.description,
         "industry": idea.industry,
@@ -49,11 +51,11 @@ async def create_idea(idea: IdeaCreate):
 
 
 @router.get("", response_model=IdeaListResponse)
-async def list_ideas(user_id: str = "demo-user"):
+async def list_ideas(user: dict = Depends(get_current_user)):
     """List all ideas for a user."""
     db = get_db_service()
     try:
-        ideas = await db.get_user_ideas(user_id)
+        ideas = await db.get_user_ideas(user["id"])
         return {"ideas": ideas, "total": len(ideas)}
     except Exception:
         return {"ideas": [], "total": 0}

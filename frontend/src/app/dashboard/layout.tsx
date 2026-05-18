@@ -36,6 +36,7 @@ export default function DashboardLayout({
   const { user, signOut } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [credits, setCredits] = useState<number | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
@@ -48,6 +49,17 @@ export default function DashboardLayout({
         ]);
         if (notifData.status === "fulfilled") setUnreadCount(notifData.value.unread_count);
         if (creditsData.status === "fulfilled") setCredits(creditsData.value.credits);
+
+        if (user) {
+          const { createClient } = await import("@/lib/supabase/client");
+          const supabase = createClient();
+          if (supabase) {
+            const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+            if (data && data.role === 'super_admin') {
+              setIsSuperAdmin(true);
+            }
+          }
+        }
       } catch {
         /* backend may not be connected */
       }
@@ -57,7 +69,7 @@ export default function DashboardLayout({
     // Poll every 30s for notification updates
     const interval = setInterval(loadHeader, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
 
   const handleBellClick = async () => {
     setShowNotifDropdown((prev) => !prev);
@@ -130,6 +142,22 @@ export default function DashboardLayout({
               {item.label}
             </Link>
           ))}
+
+          {isSuperAdmin && (
+            <>
+              <div className={styles.sidebarSection} style={{ color: "#c084fc" }}>Admin Control</div>
+              <Link
+                href="/dashboard/admin"
+                className={`${styles.navLink} ${
+                  pathname === "/dashboard/admin" ? styles.navLinkActive : ""
+                }`}
+                style={{ borderColor: pathname === "/dashboard/admin" ? "#c084fc" : "transparent" }}
+              >
+                <span className={styles.navIcon}>👑</span>
+                Admin Panel
+              </Link>
+            </>
+          )}
 
           <div className={styles.sidebarSection}>System</div>
           {NAV_SETTINGS.map((item) => (
@@ -247,6 +275,7 @@ function getPageTitle(pathname: string): string {
     "/dashboard/compare": "Compare Ideas",
     "/dashboard/team": "Team & Organization",
     "/dashboard/settings": "Settings",
+    "/dashboard/admin": "Super Admin Control Panel",
   };
   return titles[pathname] || "Dashboard";
 }

@@ -106,3 +106,64 @@ def approve_enterprise_request(request_id: str, user: dict = Depends(require_min
     except Exception as e:
         logger.error("Failed to provision enterprise", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to provision enterprise")
+
+@router.get("/organizations")
+def list_all_organizations(user: dict = Depends(require_minimum_role("super_admin"))):
+    """List all organizations globally for super admins."""
+    db = get_db_service()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database not configured")
+        
+    try:
+        # Try to select with status first
+        result = db._client.table("organizations").select("id, name, slug, plan, max_members, status, created_at").order("created_at", desc=True).execute()
+        return {"organizations": result.data or []}
+    except Exception as e:
+        if "Could not find the 'status' column" in str(e) or "column" in str(e).lower():
+            # Fallback for when the migration hasn't been applied yet
+            result = db._client.table("organizations").select("id, name, slug, plan, max_members, created_at").order("created_at", desc=True).execute()
+            orgs = result.data or []
+            for org in orgs:
+                org["status"] = "active" # Default fallback
+            return {"organizations": orgs}
+        logger.error("Failed to list all organizations", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to list organizations")
+
+@router.delete("/organizations/{org_id}")
+def delete_organization(org_id: str, user: dict = Depends(require_minimum_role("super_admin"))):
+    """Delete an organization globally."""
+    db = get_db_service()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database not configured")
+        
+    try:
+        # Clear foreign keys that lack ON DELETE CASCADE
+        db._client.table("profiles").update({"current_org_id": None}).eq("current_org_id", org_id).execute()
+        db._client.table("ideas").update({"organization_id": None}).eq("organization_id", org_id).execute()
+        
+        # Now delete the organization
+        db._client.table("organizations").delete().eq("id", org_id).execute()
+        return {"status": "success", "message": "Organization deleted"}
+    except Exception as e:
+        logger.error("Failed to delete organization", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete organization")
+
+class OrgStatusUpdate(BaseModel):
+    status: str = Field(..., pattern="^(active|suspended)$")
+
+@router.patch("/organizations/{org_id}/status")
+def update_organization_status(org_id: str, payload: OrgStatusUpdate, user: dict = Depends(require_minimum_role("super_admin"))):
+    """Suspend or reactivate an organization globally."""
+    db = get_db_service()
+    if not db:
+        raise HTTPException(status_code=500, detail="Database not configured")
+        
+    try:
+        db._client.table("organizations").update({"status": payload.status}).eq("id", org_id).execute()
+        return {"status": "success", "message": f"Organization {payload.status}"}
+    except Exception as e:
+        if "Could not find the 'status' column" in str(e) or "column" in str(e).lower():
+            raise HTTPException(status_code=501, detail="Organization suspension is not available yet. Please run migration 004_org_suspension.sql.")
+        logger.error("Failed to update organization status", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to update organization status")
+

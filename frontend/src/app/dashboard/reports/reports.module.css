@@ -10,10 +10,12 @@
 .reportDate { font-size: var(--fs-xs); color: var(--text-muted); }
 .reportActions { display: flex; gap: var(--space-2); }
 .modal {
-  position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.6);
+  position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,0.6);
   display: flex; align-items: center; justify-content: center; padding: var(--space-6);
 }
-.modalContent { width: 100%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; }
+.modalContent { 
+  width: 100%; max-width: 800px; max-height: 80vh; display: flex; flex-direction: column; 
+}
 .modalHeader {
   padding: var(--space-5); display: flex; justify-content: space-between; align-items: center;
   border-bottom: 1px solid var(--border-subtle);
@@ -22,7 +24,66 @@
 .modalBody {
   padding: var(--space-5); overflow-y: auto; flex: 1;
 }
-.modalBody pre {
-  font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-secondary);
-  white-space: pre-wrap; word-break: break-word; line-height: 1.6;
+
+.markdownContainer {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+.markdownContainer h1, .markdownContainer h2, .markdownContainer h3 {
+  color: var(--text-primary);
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+}
+.markdownContainer h1 { font-size: 1.5rem; }
+.markdownContainer h2 { font-size: 1.25rem; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.3em; }
+.markdownContainer ul { padding-left: 1.5em; margin-bottom: 1em; list-style-type: disc; }
+.markdownContainer li { margin-bottom: 0.25em; }
+.markdownContainer p { margin-bottom: 1em; }
+
+.ideaSection {
+  margin-bottom: var(--space-8);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.ideaHeader {
+  padding: var(--space-4) var(--space-5);
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.ideaHeader h3 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  color: var(--primary);
+  margin: 0;
+}
+
+.ideaReports {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.reportCard {
+  padding: var(--space-4); display: flex; align-items: center; gap: var(--space-4);
+  background: rgba(255,255,255,0.02);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  transition: all 0.2s ease;
+}
+.reportCard:hover {
+  border-color: var(--border-subtle);
+  background: rgba(255,255,255,0.04);
 }

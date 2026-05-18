@@ -424,7 +424,7 @@ async def test_org_roles_endpoint(client: AsyncClient):
     assert r.status_code == 200
     data = r.json()
     assert "roles" in data
-    assert len(data["roles"]) == 8
+    assert len(data["roles"]) == 16
     role_ids = {r["id"] for r in data["roles"]}
     assert "founder" in role_ids
     assert "admin" in role_ids

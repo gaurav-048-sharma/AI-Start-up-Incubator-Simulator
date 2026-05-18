@@ -280,9 +280,13 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Authentication required")
 
     try:
-        from supabase import create_client
-        supabase = create_client(settings.supabase_url, settings.supabase_anon_key)
-        user_response = supabase.auth.get_user(credentials.credentials)
+        import asyncio
+        from app.models.database import get_supabase_client
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database not configured")
+            
+        user_response = await asyncio.to_thread(supabase.auth.get_user, credentials.credentials)
 
         if not user_response or not user_response.user:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
@@ -299,7 +303,9 @@ async def get_current_user(
             from app.models.database import get_db_service
             db_client = get_db_service()._client
             
-            profile = db_client.table("profiles").select("current_org_id, role").eq("id", user_id).single().execute()
+            profile = await asyncio.to_thread(
+                lambda: db_client.table("profiles").select("current_org_id, role").eq("id", user_id).single().execute()
+            )
             if profile.data:
                 if profile.data.get("role"):
                     user_role = profile.data["role"]
@@ -307,8 +313,8 @@ async def get_current_user(
                 if profile.data.get("current_org_id"):
                     org_id = profile.data["current_org_id"]
 
-                    membership = (
-                        db_client.table("organization_members")
+                    membership = await asyncio.to_thread(
+                        lambda: db_client.table("organization_members")
                         .select("role")
                         .eq("organization_id", org_id)
                         .eq("user_id", user_id)
