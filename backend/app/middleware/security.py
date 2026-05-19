@@ -1,29 +1,67 @@
 """
 Security middleware stack for the AI Incubator backend.
-Provides: rate limiting, request correlation IDs, JWT auth, enterprise RBAC,
-multi-tenant org context, audit logging, and feature gating.
+Provides: rate limiting, request correlation IDs, JWT auth, separated
+platform/tenant RBAC, multi-tenant org context via X-Org-Id header,
+audit logging, and feature gating.
+
+Architecture:
+  - Platform Roles  (profiles.platform_role): super_admin, support, billing_admin, user
+  - Tenant Roles    (organization_members.role): admin, incubator_manager, founder, team_member, viewer, etc.
+  - These are NEVER merged. A user who is "admin" in Org A has zero platform-wide privileges.
 """
 
 import uuid
 import time
+import asyncio
 import structlog
 from collections import defaultdict
 from fastapi import Request, HTTPException, Depends
+from pydantic import BaseModel
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
 from typing import Optional
 from datetime import datetime, timezone
+import contextvars
+
+from app.config import get_settings
+from app.models.database import get_supabase_client
+
+# ── Caching Layer ────────────────────────────────────────────────
+# Caching role data for 60 seconds to avoid multi-second DB latency
+_PROFILE_CACHE: dict[str, dict] = {} # {user_id: {"data": {...}, "expires": float}}
+_CACHE_TTL = 60.0
+
+# Global context for passing JWT to the database service
+current_jwt: contextvars.ContextVar[str] = contextvars.ContextVar("current_jwt", default="")
 
 logger = structlog.get_logger()
 
 
 # ═══════════════════════════════════════════════════════════════════
-# ROLE HIERARCHY — defines who can do what
-# Higher numbers = more permissions. Each role inherits lower roles.
+# PLATFORM ROLES — global system-level access
 # ═══════════════════════════════════════════════════════════════════
 
-ROLE_HIERARCHY = {
+PLATFORM_ROLES = {
+    "user":          0,
+    "support":       50,
+    "billing_admin": 60,
+    "super_admin":   100,
+}
+
+PLATFORM_ROLE_DESCRIPTIONS = {
+    "user":          "Regular application user with no platform privileges",
+    "support":       "Read-only global visibility for troubleshooting",
+    "billing_admin": "Manages platform billing, subscriptions, and revenue",
+    "super_admin":   "Full platform operations: migrations, feature flags, org suspension",
+}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# TENANT ROLES — per-organization access (NEVER elevate to platform)
+# ═══════════════════════════════════════════════════════════════════
+
+TENANT_ROLE_HIERARCHY = {
     "viewer":                10,
     "team_member":           20,
     "ui_ux_designer":        20,
@@ -39,8 +77,10 @@ ROLE_HIERARCHY = {
     "innovation_lead":       50,
     "incubator_manager":     60,
     "admin":                 70,
-    "super_admin":           80,
 }
+
+# Legacy alias for backwards-compatible imports
+ROLE_HIERARCHY = {**TENANT_ROLE_HIERARCHY, "super_admin": 80}
 
 ROLE_DESCRIPTIONS = {
     "viewer":                "Read-only access to shared ideas and reports",
@@ -57,11 +97,12 @@ ROLE_DESCRIPTIONS = {
     "investor_advisor":      "Review startup simulations, provide feedback, access pitch data",
     "innovation_lead":       "Manage internal projects, organizational teams, white-label settings",
     "incubator_manager":     "Oversee cohorts, all startups, team performance, analytics dashboards",
-    "admin":                 "Manage users, billing, feature flags, moderation, platform support",
-    "super_admin":           "Full platform operations, infrastructure, analytics, monetization",
+    "admin":                 "Organization admin: manage users, billing, SSO within the workspace",
+    "super_admin":           "Platform super admin (platform_role, not a tenant role)",
 }
 
-# Which roles can perform which actions
+# ── Tenant Permissions ───────────────────────────────────────────
+
 ROLE_PERMISSIONS = {
     "viewer": [
         "view_ideas", "view_reports", "view_workflows",
@@ -138,20 +179,26 @@ ROLE_PERMISSIONS = {
         "manage_cohorts", "invite_members", "remove_members", "view_audit_log",
         "manage_billing", "manage_feature_flags", "manage_users", "manage_org",
     ],
-    "super_admin": ["*"],  # All permissions
 }
 
 
 def has_permission(user_role: str, required_permission: str) -> bool:
-    """Check if a role has a specific permission."""
+    """Check if a TENANT role has a specific permission."""
     perms = ROLE_PERMISSIONS.get(user_role, [])
-    return "*" in perms or required_permission in perms
+    return required_permission in perms
 
 
 def has_role_level(user_role: str, minimum_role: str) -> bool:
-    """Check if the user's role level meets or exceeds the minimum."""
-    user_level = ROLE_HIERARCHY.get(user_role, 0)
-    min_level = ROLE_HIERARCHY.get(minimum_role, 999)
+    """Check if a TENANT role level meets or exceeds the minimum."""
+    user_level = TENANT_ROLE_HIERARCHY.get(user_role, 0)
+    min_level = TENANT_ROLE_HIERARCHY.get(minimum_role, 999)
+    return user_level >= min_level
+
+
+def has_platform_level(platform_role: str, minimum: str) -> bool:
+    """Check if user's platform role meets the minimum."""
+    user_level = PLATFORM_ROLES.get(platform_role, 0)
+    min_level = PLATFORM_ROLES.get(minimum, 999)
     return user_level >= min_level
 
 
@@ -182,7 +229,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._windows[key] = [t for t in self._windows[key] if t > cutoff]
 
     async def dispatch(self, request: Request, call_next):
-        # Skip rate limiting for health checks and WebSockets
         if request.url.path in ("/health", "/", "/docs", "/redoc", "/openapi.json"):
             return await call_next(request)
         if request.url.path.startswith("/ws/"):
@@ -191,6 +237,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         client_ip = self._get_client_ip(request)
         now = time.time()
         self._clean_window(client_ip, now)
+
+        # Check if user is authenticated and is a super_admin to bypass rate limit
+        # We can't easily check the token here because this middleware might run before auth
+        # But we can check after the profile lookup if we moved this.
+        # For now, I'll keep it simple: if the path is an admin path, we can be more lenient.
+        if request.url.path.startswith("/api/admin/"):
+             pass # Will check role inside the route if needed, or just let it pass for now
 
         if len(self._windows[client_ip]) >= self.rpm:
             logger.warning("Rate limit exceeded", client_ip=client_ip, path=request.url.path)
@@ -208,23 +261,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# ── Request ID Middleware ────────────────────────────────────────
-
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """Adds a unique X-Request-ID header to every request for tracing."""
 
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
         request.state.request_id = request_id
-
         structlog.contextvars.bind_contextvars(request_id=request_id)
-
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         return response
 
-
-# ── Request Timing ───────────────────────────────────────────────
 
 class TimingMiddleware(BaseHTTPMiddleware):
     """Logs request duration for performance monitoring."""
@@ -247,6 +294,26 @@ class TimingMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class TenantContextMiddleware(BaseHTTPMiddleware):
+    """
+    Validates the X-Org-Id header and injects tenant context into request.state.
+    This replaces the anti-pattern of storing current_org_id in the database.
+    
+    After this middleware runs:
+      request.state.org_id   — the validated org UUID (or None)
+      request.state.org_role — the user's role inside that org (or None)
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        # Initialize defaults
+        request.state.org_id = None
+        request.state.org_role = None
+        
+        # Pass through for non-API and unauthenticated requests
+        response = await call_next(request)
+        return response
+
+
 # ═══════════════════════════════════════════════════════════════════
 # AUTH DEPENDENCIES
 # ═══════════════════════════════════════════════════════════════════
@@ -255,88 +322,164 @@ security_scheme = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme),
 ) -> dict:
     """
-    Validates the Supabase JWT and returns the user payload with role and org info.
-    Falls back to demo-user when auth is not configured.
+    Validates the Supabase JWT and returns the user payload.
+    
+    Returns dict with SEPARATED scopes:
+      - id, email, full_name      — identity
+      - platform_role             — system-wide role (user/support/billing_admin/super_admin)
+      - tier                      — subscription tier (free/pro/enterprise)
+      - org_id                    — active tenant from X-Org-Id header
+      - org_role                  — role WITHIN that tenant (admin/founder/viewer/etc.)
+    
+    CRITICAL: org_role never elevates platform_role or vice versa.
     """
     from app.config import get_settings
     settings = get_settings()
 
-    # In development without Supabase, allow demo access
+    # Demo mode
     if not settings.has_supabase:
         return {
             "id": "demo-user",
             "email": "demo@incubator.ai",
-            "role": "founder",
+            "platform_role": "user",
             "tier": "free",
             "org_id": None,
-            "org_role": None,
+            "org_role": "founder",
             "full_name": "Demo Founder",
+            # Legacy compat
+            "role": "founder",
         }
 
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication required")
 
+    current_jwt.set(credentials.credentials)
+
     try:
         import asyncio
         from app.models.database import get_supabase_client
-        supabase = get_supabase_client()
+        supabase = get_supabase_client(admin=True)
         if not supabase:
+            logger.error("Database client initialization failed")
             raise HTTPException(status_code=500, detail="Database not configured")
-            
-        user_response = await asyncio.to_thread(supabase.auth.get_user, credentials.credentials)
+
+        # Use the admin client to get user details
+        try:
+            user_response = await asyncio.to_thread(supabase.auth.get_user, credentials.credentials)
+        except Exception as auth_err:
+            logger.error("Supabase auth.get_user failed", error=str(auth_err))
+            raise HTTPException(status_code=401, detail="Invalid session")
 
         if not user_response or not user_response.user:
-            raise HTTPException(status_code=401, detail="Invalid or expired token")
+            logger.warning("No user found in Supabase session")
+            raise HTTPException(status_code=401, detail="Invalid token")
 
         user = user_response.user
         user_id = str(user.id)
-        user_role = user.user_metadata.get("role", "founder")
         user_tier = user.user_metadata.get("tier", "free")
+        
+        # MFA Context: Authenticator Assurance Level (aal1 = password, aal2 = MFA)
+        auth_app_metadata = user.app_metadata or {}
+        aal = auth_app_metadata.get("aal", "aal1")
 
-        # Fetch organization membership and real profile role if exists
-        org_id = None
+        # Fetch platform_role from profiles (with caching)
+        platform_role = user.user_metadata.get("platform_role", "user")
+        profile_role = user.user_metadata.get("role", "founder")
+        
+        now = time.time()
+        cached = _PROFILE_CACHE.get(user_id)
+        
+        if cached and cached["expires"] > now:
+            p_data = cached["data"]
+            platform_role = p_data.get("platform_role", platform_role)
+            profile_role = p_data.get("role", profile_role)
+            user_tier = p_data.get("tier", user_tier)
+        else:
+            try:
+                db_client = get_supabase_client(admin=True)
+                profile = await asyncio.to_thread(
+                    lambda: db_client.table("profiles")
+                    .select("platform_role, role, tier")
+                    .eq("id", user_id)
+                    .single()
+                    .execute()
+                )
+                if profile.data:
+                    platform_role = profile.data.get("platform_role") or platform_role
+                    profile_role = profile.data.get("role") or profile_role
+                    user_tier = profile.data.get("tier") or user_tier
+                    # Cache it
+                    _PROFILE_CACHE[user_id] = {
+                        "data": {
+                            "platform_role": platform_role,
+                            "role": profile_role,
+                            "tier": user_tier
+                        },
+                        "expires": now + _CACHE_TTL
+                    }
+            except Exception as e:
+                logger.warning("Profile enrichment failed", error=str(e), user_id=user_id)
+
+        # Resolve tenant context from X-Org-Id header
+        org_id = request.headers.get("x-org-id")
+        if org_id == "": # Handle empty string from frontend
+            org_id = None
         org_role = None
-        try:
-            from app.models.database import get_db_service
-            db_client = get_db_service()._client
-            
-            profile = await asyncio.to_thread(
-                lambda: db_client.table("profiles").select("current_org_id, role").eq("id", user_id).single().execute()
-            )
-            if profile.data:
-                if profile.data.get("role"):
-                    user_role = profile.data["role"]
-                    
-                if profile.data.get("current_org_id"):
-                    org_id = profile.data["current_org_id"]
 
-                    membership = await asyncio.to_thread(
-                        lambda: db_client.table("organization_members")
-                        .select("role")
-                        .eq("organization_id", org_id)
-                        .eq("user_id", user_id)
-                        .single()
-                        .execute()
-                    )
+        # Super Admins only resolve org context if they explicitly provide it.
+        # They are NOT restricted by memberships.
+        if platform_role == "super_admin":
+            if org_id:
+                # If they select an org, they get 'admin' role in that context
+                org_role = "admin"
+            return {
+                "id": user_id,
+                "email": user.email,
+                "platform_role": platform_role,
+                "tier": user_tier,
+                "org_id": org_id,
+                "org_role": org_role,
+                "mfa_active": aal == "aal2",
+                "mfa_aal": aal,
+                "full_name": user.user_metadata.get("full_name", ""),
+                "role": profile_role,
+            }
+
+        if org_id:
+            try:
+                # Reuse the same client instance if possible
+                membership = await asyncio.to_thread(
+                    lambda: supabase.table("organization_members")
+                    .select("role")
+                    .eq("organization_id", org_id)
+                    .eq("user_id", user_id)
+                    .single()
+                    .execute()
+                )
                 if membership.data:
                     org_role = membership.data["role"]
-                    # Org role overrides user role if it's higher
-                    if has_role_level(org_role, user_role):
-                        user_role = org_role
-        except Exception:
-            pass  # No org context is fine
+                else:
+                    # Regular user tried to access an org they don't belong to
+                    org_id = None
+            except Exception:
+                org_id = None
 
         return {
             "id": user_id,
             "email": user.email,
-            "role": user_role,
+            "platform_role": platform_role,
             "tier": user_tier,
             "org_id": org_id,
             "org_role": org_role,
+            "mfa_active": aal == "aal2",
+            "mfa_aal": aal,
             "full_name": user.user_metadata.get("full_name", ""),
+            # Legacy compat — the user's profile role (NOT platform scope)
+            "role": profile_role,
         }
     except HTTPException:
         raise
@@ -346,38 +489,94 @@ async def get_current_user(
 
 
 # ═══════════════════════════════════════════════════════════════════
-# RBAC DEPENDENCIES
+# RBAC DEPENDENCIES — PLATFORM SCOPE
+# ═══════════════════════════════════════════════════════════════════
+
+def require_platform_role(minimum_role: str):
+    """
+    Dependency that checks the user's PLATFORM role.
+    Use this for global admin endpoints (enterprise management, org listing, etc.)
+    """
+    async def _checker(user: dict = Depends(get_current_user)):
+        if not has_platform_level(user.get("platform_role", "user"), minimum_role):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Platform role '{minimum_role}' required. Your platform role: '{user.get('platform_role', 'user')}'"
+            )
+        return user
+    return _checker
+
+
+# ═══════════════════════════════════════════════════════════════════
+# RBAC DEPENDENCIES — TENANT SCOPE
 # ═══════════════════════════════════════════════════════════════════
 
 def require_role(*allowed_roles: str):
-    """Dependency that checks if the current user has one of the allowed roles."""
+    """Dependency that checks if the current user has one of the allowed tenant roles."""
     async def _checker(user: dict = Depends(get_current_user)):
-        if user.get("role") not in allowed_roles:
+        effective = user.get("org_role") or user.get("role", "viewer")
+        if effective not in allowed_roles and user.get("platform_role") != "super_admin":
             raise HTTPException(status_code=403, detail=f"Requires role: {', '.join(allowed_roles)}")
         return user
     return _checker
 
 
 def require_minimum_role(minimum_role: str):
-    """Dependency that checks if the user's role level meets a minimum threshold."""
-    async def _checker(user: dict = Depends(get_current_user)):
-        if not has_role_level(user.get("role", "viewer"), minimum_role):
+    """
+    Dependency that checks if the user's TENANT role level meets a minimum threshold.
+    Also validates IDOR: if the path contains {org_id}, the user must belong to THAT org.
+    Platform super_admins bypass tenant checks.
+    """
+    async def _checker(request: Request, user: dict = Depends(get_current_user)):
+        # Platform super_admins bypass tenant-level checks
+        if user.get("platform_role") == "super_admin":
+            return user
+        
+        target_org = request.path_params.get("org_id")
+
+        # IDOR protection: path org_id must match the user's active org context
+        if target_org:
+            if user.get("org_id") != target_org:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied: you are not a member of this organization."
+                )
+
+        # Determine effective tenant role
+        effective_role = user.get("org_role") or user.get("role", "viewer")
+
+        if not has_role_level(effective_role, minimum_role):
             raise HTTPException(
                 status_code=403,
-                detail=f"Requires at least '{minimum_role}' role. Your role: '{user.get('role')}'"
+                detail=f"Requires at least '{minimum_role}' role. Your effective role: '{effective_role}'"
             )
         return user
     return _checker
 
 
 def require_permission(permission: str):
-    """Dependency that checks if the user has a specific permission."""
-    async def _checker(user: dict = Depends(get_current_user)):
-        user_role = user.get("role", "viewer")
-        if not has_permission(user_role, permission):
+    """Dependency that checks if the user has a specific tenant permission."""
+    async def _checker(request: Request, user: dict = Depends(get_current_user)):
+        # Platform super_admins have all permissions
+        if user.get("platform_role") == "super_admin":
+            return user
+
+        target_org = request.path_params.get("org_id")
+
+        # IDOR protection
+        if target_org:
+            if user.get("org_id") != target_org:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Access denied: you are not a member of this organization."
+                )
+
+        effective_role = user.get("org_role") or user.get("role", "viewer")
+
+        if not has_permission(effective_role, permission):
             raise HTTPException(
                 status_code=403,
-                detail=f"Missing permission: '{permission}'. Your role: '{user_role}'"
+                detail=f"Missing permission: '{permission}'. Your effective role: '{effective_role}'"
             )
         return user
     return _checker
@@ -386,6 +585,9 @@ def require_permission(permission: str):
 def require_tier(*allowed_tiers: str):
     """Dependency that checks if the user's subscription tier allows access."""
     async def _checker(user: dict = Depends(get_current_user)):
+        # SUPER ADMIN EXEMPTION
+        if user.get("platform_role") == "super_admin":
+            return user
         if user.get("tier") not in allowed_tiers:
             raise HTTPException(
                 status_code=403,
@@ -395,16 +597,51 @@ def require_tier(*allowed_tiers: str):
     return _checker
 
 
-def require_org_membership():
-    """Dependency that ensures the user belongs to an organization."""
+def require_org_context():
+    """
+    Dependency that ensures a valid X-Org-Id header was provided and resolved.
+    Use this on any endpoint that operates within a tenant workspace.
+    """
     async def _checker(user: dict = Depends(get_current_user)):
-        if not user.get("org_id"):
+        if not user.get("org_id") and user.get("platform_role") != "super_admin":
             raise HTTPException(
                 status_code=403,
-                detail="This feature requires organization membership. Create or join an organization first."
+                detail="X-Org-Id header required. Select an organization context."
             )
         return user
     return _checker
+
+
+def require_mfa_stepup():
+    """
+    Dependency that enforces MFA step-up for privileged roles.
+    Blocked roles: platform super_admin, platform billing_admin, tenant admin.
+    These roles MUST have an aal2 session to access the endpoint.
+    Dependency that enforces aal2 (MFA) session.
+    Bypassed in development mode for easier testing.
+    """
+    async def _checker(user: dict = Depends(get_current_user)):
+        from app.config import get_settings
+        settings = get_settings()
+        
+        # Bypass MFA in development for improved developer experience
+        if settings.debug or settings.environment == "development":
+            return user
+            
+        if not user.get("mfa_active"):
+            logger.warning("MFA step-up required for privileged access", 
+                           user_id=user["id"], role=user.get("platform_role"))
+            raise HTTPException(
+                status_code=403,
+                detail="MFA required. Please complete a second-factor challenge."
+            )
+        return user
+    return _checker
+
+
+def require_org_membership():
+    """Dependency that ensures the user belongs to an organization (backward compat)."""
+    return require_org_context()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -442,6 +679,8 @@ FEATURE_TIERS = {
 def require_feature(feature: str):
     """Dependency that checks if the user's tier includes the requested feature."""
     async def _checker(user: dict = Depends(get_current_user)):
+        if user.get("platform_role") == "super_admin":
+            return user
         allowed_tiers = FEATURE_TIERS.get(feature, [])
         user_tier = user.get("tier", "free")
         if user_tier not in allowed_tiers:

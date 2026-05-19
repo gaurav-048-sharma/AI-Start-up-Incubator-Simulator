@@ -4,20 +4,35 @@ interface ApiOptions {
   method?: string;
   body?: unknown;
   headers?: Record<string, string>;
+  /** Skip org context injection (for platform-level routes) */
+  skipOrgContext?: boolean;
 }
 
+/**
+ * Core API request function.
+ * Automatically injects:
+ *   - Authorization header from Supabase JWT
+ *   - X-Org-Id header from localStorage (for tenant-scoped requests)
+ */
 export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
-  const { method = "GET", body, headers = {} } = options;
+  const { method = "GET", body, headers = {}, skipOrgContext = false } = options;
+
+  // Resolve active org from localStorage (Slack/GitHub-style multi-org switching)
+  const activeOrgId =
+    !skipOrgContext && typeof window !== "undefined"
+      ? localStorage.getItem("activeOrgId")
+      : null;
 
   const config: RequestInit = {
     method,
     headers: {
       "Content-Type": "application/json",
+      ...(activeOrgId ? { "X-Org-Id": activeOrgId } : {}),
       ...headers,
     },
   };
 
-  // Try to inject Supabase JWT if client is available
+  // Inject Supabase JWT
   if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL) {
     try {
       const { createClient } = await import("./supabase/client");
@@ -46,6 +61,33 @@ export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}):
 
   return response.json();
 }
+
+// ── Org Context Helpers ─────────────────────────────────────────
+
+/** Set the active organization for multi-tab safe context switching */
+export function setActiveOrg(orgId: string) {
+  if (typeof window !== "undefined") {
+    localStorage.setItem("activeOrgId", orgId);
+    // Dispatch storage event for cross-tab sync
+    window.dispatchEvent(new StorageEvent("storage", { key: "activeOrgId", newValue: orgId }));
+  }
+}
+
+/** Get the current active organization ID */
+export function getActiveOrgId(): string | null {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("activeOrgId");
+  }
+  return null;
+}
+
+/** Clear active org context */
+export function clearActiveOrg() {
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("activeOrgId");
+  }
+}
+
 
 // ── Ideas API ────────────────────────────────────────────────────
 export const ideasApi = {
@@ -132,7 +174,7 @@ export const comparisonApi = {
     }),
 };
 
-// ── Organizations API ────────────────────────────────────────────
+// ── Organizations API (Tenant-scoped) ────────────────────────────
 export const organizationsApi = {
   list: () =>
     apiRequest<{ organizations: Organization[] }>("/api/organizations"),
@@ -151,6 +193,11 @@ export const organizationsApi = {
     apiRequest<{ success: boolean }>(`/api/organizations/${orgId}/members/${userId}/role`, {
       method: "PATCH",
       body: { role },
+    }),
+  updateSSO: (orgId: string, ssoData: Record<string, unknown>) =>
+    apiRequest<{ success: boolean }>(`/api/organizations/${orgId}/sso`, {
+      method: "PATCH",
+      body: ssoData,
     }),
   removeMember: (orgId: string, userId: string) =>
     apiRequest<{ success: boolean }>(`/api/organizations/${orgId}/members/${userId}`, {
@@ -172,10 +219,130 @@ export const organizationsApi = {
     ),
 };
 
+// ── Billing API ──────────────────────────────────────────────────
+export const billingApi = {
+  getPlans: () =>
+    apiRequest<{ plans: BillingPlan[] }>("/api/billing/plans"),
+  getStatus: () =>
+    apiRequest<BillingStatus>("/api/billing/status"),
+  createCheckout: (tier: string, orgId?: string) =>
+    apiRequest<{ checkout_url: string; session_id: string }>("/api/billing/checkout", {
+      method: "POST",
+      body: {
+        tier,
+        org_id: orgId,
+        success_url: `${typeof window !== "undefined" ? window.location.origin : ""}/dashboard/settings?billing=success`,
+        cancel_url: `${typeof window !== "undefined" ? window.location.origin : ""}/dashboard/settings?billing=cancel`,
+      },
+    }),
+};
+
+// ── Platform Admin API ───────────────────────────────────────────
+// These endpoints skip org context injection — they are platform-scoped.
+export const adminApi = {
+  // Enterprise requests
+  listEnterpriseRequests: () =>
+    apiRequest<{ requests: EnterpriseRequest[] }>("/api/admin/requests", { skipOrgContext: true }),
+  approveEnterpriseRequest: (requestId: string) =>
+    apiRequest<{ status: string; checkout_url: string }>(`/api/admin/approve/${requestId}`, {
+      method: "POST",
+      skipOrgContext: true,
+    }),
+  rejectEnterpriseRequest: (requestId: string) =>
+    apiRequest<{ status: string }>(`/api/admin/reject/${requestId}`, {
+      method: "POST",
+      skipOrgContext: true,
+    }),
+
+  // Global org management
+  listAllOrganizations: () =>
+    apiRequest<{ organizations: Organization[] }>("/api/admin/organizations", { skipOrgContext: true }),
+  deleteOrganization: (orgId: string) =>
+    apiRequest<{ status: string }>(`/api/admin/organizations/${orgId}`, {
+      method: "DELETE",
+      skipOrgContext: true,
+    }),
+  updateOrgStatus: (orgId: string, status: "active" | "suspended") =>
+    apiRequest<{ status: string }>(`/api/admin/organizations/${orgId}/status`, {
+      method: "PATCH",
+      body: { status },
+      skipOrgContext: true,
+    }),
+
+  // Platform user management
+  listUsers: (limit: number = 100) =>
+    apiRequest<{ users: PlatformUser[] }>(`/api/admin/users?limit=${limit}`, { skipOrgContext: true }),
+  updatePlatformRole: (userId: string, platformRole: string) =>
+    apiRequest<{ status: string }>(`/api/admin/users/${userId}/platform-role`, {
+      method: "PATCH",
+      body: { platform_role: platformRole },
+      skipOrgContext: true,
+    }),
+};
+
+// ── MFA API ───────────────────────────────────────────────────────
+export const mfaApi = {
+  /** List enrolled MFA factors */
+  listFactors: () =>
+    apiRequest<MfaFactorsResponse>("/api/auth/mfa/factors"),
+
+  /** Get quick MFA status for current user */
+  getStatus: () =>
+    apiRequest<MfaStatusResponse>("/api/auth/mfa/status"),
+
+  /** Begin TOTP enrollment — returns QR code */
+  enroll: (friendlyName?: string) =>
+    apiRequest<MfaEnrollResponse>("/api/auth/mfa/enroll", {
+      method: "POST",
+      body: { friendly_name: friendlyName || "Authenticator App" },
+    }),
+
+  /** Verify TOTP code to complete enrollment */
+  verify: (factorId: string, code: string) =>
+    apiRequest<MfaVerifyResponse>("/api/auth/mfa/verify", {
+      method: "POST",
+      body: { factor_id: factorId, code },
+    }),
+
+  /** Create an MFA challenge (login step-up) */
+  challenge: (factorId: string) =>
+    apiRequest<MfaChallengeResponse>("/api/auth/mfa/challenge", {
+      method: "POST",
+      body: { factor_id: factorId },
+    }),
+
+  /** Verify an MFA challenge to upgrade session to aal2 */
+  challengeVerify: (factorId: string, challengeId: string, code: string) =>
+    apiRequest<MfaVerifyResponse>("/api/auth/mfa/challenge/verify", {
+      method: "POST",
+      body: { factor_id: factorId, challenge_id: challengeId, code },
+    }),
+
+  /** Remove a TOTP factor (disable 2FA) */
+  unenroll: (factorId: string) =>
+    apiRequest<{ success: boolean; message: string }>("/api/auth/mfa/unenroll", {
+      method: "DELETE",
+      body: { factor_id: factorId },
+    }),
+};
+
+// ── Enterprise Request API (public endpoint) ─────────────────────
+export const enterpriseApi = {
+  submit: (data: EnterpriseRequestCreate) =>
+    apiRequest<{ status: string; id: string }>("/api/admin/request", {
+      method: "POST",
+      body: data,
+      skipOrgContext: true,
+    }),
+};
+
+
 // ── Types ────────────────────────────────────────────────────────
+
 export interface Idea {
   id: string;
   user_id: string;
+  organization_id?: string;
   title: string;
   description: string;
   industry?: string;
@@ -315,8 +482,10 @@ export interface Organization {
   max_members: number;
   max_ideas: number;
   member_count?: number;
+  parent_id?: string | null;
   my_role?: string;
   is_owner?: boolean;
+  subscription_status?: string;
   created_at: string;
 }
 
@@ -346,4 +515,103 @@ export interface AuditEntry {
   details: Record<string, unknown>;
   ip_address?: string;
   created_at: string;
+}
+
+export interface BillingPlan {
+  tier: string;
+  name: string;
+  price: number;
+  features: string[];
+}
+
+export interface BillingStatus {
+  tier: string;
+  status: string;
+  current_period_end?: string;
+  cancel_at_period_end: boolean;
+}
+
+export interface PlatformUser {
+  id: string;
+  full_name?: string;
+  role: string;
+  platform_role: string;
+  tier: string;
+  credits: number;
+  created_at: string;
+}
+
+export interface EnterpriseRequest {
+  id: string;
+  company_name: string;
+  contact_name: string;
+  contact_email: string;
+  team_size?: string;
+  industry?: string;
+  use_case?: string;
+  required_seats?: number;
+  status: string;
+  created_at: string;
+}
+
+export interface EnterpriseRequestCreate {
+  company_name: string;
+  contact_name: string;
+  contact_email: string;
+  team_size?: string;
+  industry?: string;
+  use_case?: string;
+  required_seats?: number;
+  compliance_requirements?: string;
+  white_label_needs?: boolean;
+  billing_preferences?: string;
+  notes?: string;
+}
+
+// ── MFA Types ────────────────────────────────────────────────────
+
+export interface MfaFactor {
+  id: string;
+  friendly_name?: string;
+  factor_type: string;
+  status: "unverified" | "verified";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MfaFactorsResponse {
+  factors: MfaFactor[];
+  has_verified_factor: boolean;
+  mfa_enabled: boolean;
+}
+
+export interface MfaStatusResponse {
+  mfa_active: boolean;
+  platform_role: string;
+  org_role?: string;
+  mfa_required: boolean;
+  enforcement: Record<string, string>;
+}
+
+export interface MfaEnrollResponse {
+  factor_id: string;
+  totp: {
+    qr_code: string;
+    secret: string;
+    uri: string;
+  };
+  friendly_name: string;
+}
+
+export interface MfaChallengeResponse {
+  challenge_id: string;
+  factor_id: string;
+  expires_at?: string;
+}
+
+export interface MfaVerifyResponse {
+  success: boolean;
+  message?: string;
+  access_token?: string;
+  refresh_token?: string;
 }

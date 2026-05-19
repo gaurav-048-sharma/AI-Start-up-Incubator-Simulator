@@ -1,9 +1,10 @@
-"""
+﻿"""
 Settings API Routes — user preference management and persistence.
 """
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends
+from app.middleware.security import get_current_user, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone
@@ -39,8 +40,9 @@ class UserSettingsResponse(BaseModel):
 
 
 @router.get("", response_model=UserSettingsResponse)
-async def get_settings(user_id: str = "demo-user"):
+async def get_settings(user: dict = Depends(get_current_user)):
     """Get user settings (creates defaults if not exists)."""
+    user_id = user["id"]
     from app.models.database import get_db_service
     db = get_db_service()
 
@@ -62,8 +64,9 @@ async def get_settings(user_id: str = "demo-user"):
 
 
 @router.patch("", response_model=UserSettingsResponse)
-async def update_settings(update: UserSettingsUpdate, user_id: str = "demo-user"):
+async def update_settings(update: UserSettingsUpdate, user: dict = Depends(get_current_user)):
     """Update user settings. Creates the record if it doesn't exist."""
+    user_id = user["id"]
     from app.models.database import get_db_service
     db = get_db_service()
 

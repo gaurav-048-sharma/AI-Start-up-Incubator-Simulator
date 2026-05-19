@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./layout.module.css";
-import { notificationsApi, analyticsApi, type Notification as AppNotification } from "@/lib/api";
+import { notificationsApi, analyticsApi, organizationsApi, type Notification as AppNotification, type Organization } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 
 const NAV_ITEMS = [
@@ -39,16 +39,43 @@ export default function DashboardLayout({
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Check localStorage first for active org
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("activeOrgId");
+      if (stored) setActiveOrgId(stored);
+    }
+  }, []);
+
+  const switchOrganization = (orgId: string) => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("activeOrgId", orgId);
+    }
+    setActiveOrgId(orgId);
+    window.location.reload(); // Hard reload to clear tenant context 
+  };
 
   useEffect(() => {
     async function loadHeader() {
       try {
-        const [notifData, creditsData] = await Promise.allSettled([
+        const [notifData, creditsData, orgsData] = await Promise.allSettled([
           notificationsApi.getUnreadCount(),
           analyticsApi.getCredits(),
+          organizationsApi.list(),
         ]);
         if (notifData.status === "fulfilled") setUnreadCount(notifData.value.unread_count);
         if (creditsData.status === "fulfilled") setCredits(creditsData.value.credits);
+        if (orgsData.status === "fulfilled" && orgsData.value.organizations?.length > 0) {
+          setOrganizations(orgsData.value.organizations);
+          if (!activeOrgId && typeof window !== "undefined") {
+            const firstOrgId = orgsData.value.organizations[0].id;
+            setActiveOrgId(firstOrgId);
+            localStorage.setItem("activeOrgId", firstOrgId);
+          }
+        }
 
         if (user) {
           const { createClient } = await import("@/lib/supabase/client");
@@ -113,6 +140,31 @@ export default function DashboardLayout({
             <div className={styles.sidebarBrandSub}>Startup Simulator</div>
           </div>
         </div>
+
+        {!isSuperAdmin && organizations.length > 0 && (
+          <div className={styles.workspaceSelector}>
+            <div className={styles.sidebarSection}>Workspace</div>
+            <select 
+              value={activeOrgId || ""} 
+              onChange={(e) => switchOrganization(e.target.value)}
+              className={styles.orgSelect}
+            >
+              {organizations.map(org => (
+                <option key={org.id} value={org.id}>{org.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {isSuperAdmin && (
+          <div className={styles.platformBadge}>
+            <div className={styles.sidebarSection}>Active Context</div>
+            <div className={styles.activeContext}>
+              <span className={styles.contextIcon}>🌐</span>
+              Global Platform View
+            </div>
+          </div>
+        )}
 
         <nav className={styles.sidebarNav}>
           <div className={styles.sidebarSection}>Main</div>
@@ -183,7 +235,11 @@ export default function DashboardLayout({
                   {user?.user_metadata?.full_name || user?.email || "Founder"}
                 </div>
                 <div className={styles.userRole}>
-                  Free Plan · {credits !== null ? credits : "—"} credits
+                  {isSuperAdmin ? (
+                    <span style={{ color: "#c084fc", fontWeight: "600" }}>Platform Admin · Unlimited</span>
+                  ) : (
+                    <>{user?.user_metadata?.tier || "Free"} Plan · {credits !== null ? credits : "—"} credits</>
+                  )}
                 </div>
               </div>
             </div>

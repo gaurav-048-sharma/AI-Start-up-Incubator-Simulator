@@ -59,7 +59,7 @@ export default function ReportsPage() {
 
   const handleDownloadPDF = () => {
     if (!selectedReport) return;
-    const content = selectedReport.content?.raw || "";
+    const content = String(selectedReport.content?.raw || "");
 
     // Open a new window and print it to generate a clean PDF
     const printWindow = window.open('', '_blank');
@@ -215,7 +215,7 @@ export default function ReportsPage() {
             <div className={styles.modalBody}>
               <div
                 className={styles.markdownContainer}
-                dangerouslySetInnerHTML={renderMarkdown(selectedReport.content?.raw || "No content generated yet.")}
+                dangerouslySetInnerHTML={renderMarkdown(String(selectedReport.content?.raw || "No content generated yet."))}
               />
             </div>
           </div>

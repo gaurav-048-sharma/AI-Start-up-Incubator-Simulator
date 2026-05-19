@@ -41,6 +41,7 @@ class AnalyticsService:
         user_id: str,
         event_type: str,
         idea_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
         tokens_used: int = 0,
         model: str = "gpt-4o",
         metadata: Optional[dict] = None,
@@ -52,6 +53,7 @@ class AnalyticsService:
             user_id: The user performing the action.
             event_type: One of: workflow_run, agent_run, simulation_run, etc.
             idea_id: Associated idea (optional).
+            organization_id: Associated organization (optional).
             tokens_used: Number of LLM tokens consumed.
             model: LLM model used (for cost calculation).
             metadata: Extra context data.
@@ -65,6 +67,7 @@ class AnalyticsService:
         event_data = {
             "id": str(uuid4()),
             "user_id": user_id,
+            "organization_id": organization_id,
             "event_type": event_type,
             "idea_id": idea_id,
             "tokens_used": tokens_used,
@@ -91,6 +94,7 @@ class AnalyticsService:
                 "Usage event tracked",
                 event_type=event_type,
                 user_id=user_id,
+                org_id=organization_id,
                 tokens=tokens_used,
                 cost=round(cost_usd, 6),
             )
@@ -139,7 +143,7 @@ class AnalyticsService:
         return current >= required
 
     async def get_usage_summary(
-        self, user_id: str, days: int = 30
+        self, user_id: str, days: int = 30, organization_id: Optional[str] = None
     ) -> dict:
         """
         Get aggregated usage statistics for the analytics dashboard.
@@ -150,14 +154,19 @@ class AnalyticsService:
         """
         try:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-            result = (
+            query = (
                 self._db._client.table("usage_events")
                 .select("*")
-                .eq("user_id", user_id)
                 .gte("created_at", cutoff)
                 .order("created_at", desc=True)
-                .execute()
             )
+            
+            if organization_id:
+                query = query.eq("organization_id", organization_id)
+            else:
+                query = query.eq("user_id", user_id)
+                
+            result = query.execute()
             events = result.data or []
 
             total_tokens = sum(e.get("tokens_used", 0) for e in events)
@@ -168,7 +177,7 @@ class AnalyticsService:
                 t = e.get("event_type", "unknown")
                 events_by_type[t] = events_by_type.get(t, 0) + 1
 
-            # Daily breakdown (last 7 days)
+            # Daily breakdown
             daily: dict[str, dict] = {}
             for e in events:
                 day = e.get("created_at", "")[:10]
@@ -185,9 +194,10 @@ class AnalyticsService:
                 "events_by_type": events_by_type,
                 "daily_usage": [
                     {"date": k, **v}
-                    for k, v in sorted(daily.items(), reverse=True)[:7]
+                    for k, v in sorted(daily.items(), reverse=True)
                 ],
                 "period_days": days,
+                "organization_id": organization_id
             }
         except Exception as e:
             logger.error("Failed to get usage summary", error=str(e))

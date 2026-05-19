@@ -119,10 +119,9 @@ class ProfileResponse(BaseModel):
     avatar_url: Optional[str] = None
     company_name: Optional[str] = None
     role: str = "founder"
+    platform_role: str = "user"
     tier: str = "free"
     credits: int = 10
-    current_org_id: Optional[Union[str, UUID]] = None
-    org_role: Optional[str] = None
     total_ideas_created: int = 0
     total_workflows_run: int = 0
     created_at: Optional[datetime] = None
@@ -162,6 +161,7 @@ class IdeaResponse(BaseModel):
     """Startup idea response."""
     id: Union[str, UUID]
     user_id: Union[str, UUID] = "demo-user"
+    organization_id: Optional[Union[str, UUID]] = None
     title: str
     description: str
     industry: Optional[str] = None
@@ -234,6 +234,7 @@ class SimulationResponse(BaseModel):
     """Investor simulation response."""
     id: Union[str, UUID]
     idea_id: Union[str, UUID]
+    organization_id: Optional[Union[str, UUID]] = None
     simulation_type: str = "pitch"
     investor_profiles: Any = []
     transcript: list[dict[str, Any]] = []

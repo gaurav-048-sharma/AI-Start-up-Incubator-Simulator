@@ -3,20 +3,24 @@ Analytics API Routes — usage tracking, credit balance, and cost reporting.
 """
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.middleware.security import get_current_user
 
 logger = structlog.get_logger()
 router = APIRouter()
 
 
 @router.get("/usage")
-async def get_usage_summary(user_id: str = "demo-user", days: int = 30):
+async def get_usage_summary(days: int = 30, user: dict = Depends(get_current_user)):
     """Get usage analytics summary for the dashboard."""
+    user_id = user["id"]
+    org_id = user.get("org_id")
+    
     from app.services.analytics import get_analytics_service
     analytics = get_analytics_service()
 
     try:
-        summary = await analytics.get_usage_summary(user_id, days)
+        summary = await analytics.get_usage_summary(user_id, days, organization_id=org_id)
         return summary
     except Exception:
         return {
@@ -26,11 +30,13 @@ async def get_usage_summary(user_id: str = "demo-user", days: int = 30):
             "events_by_type": {},
             "daily_usage": [],
             "period_days": days,
+            "organization_id": org_id
         }
 
 
 @router.get("/credits")
-async def get_credits(user_id: str = "demo-user"):
+async def get_credits(user: dict = Depends(get_current_user)):
+    user_id = user["id"]
     """Get current credit balance."""
     from app.services.analytics import get_analytics_service
     analytics = get_analytics_service()
@@ -39,7 +45,8 @@ async def get_credits(user_id: str = "demo-user"):
 
 
 @router.get("/credits/check")
-async def check_credits(event_type: str, user_id: str = "demo-user"):
+async def check_credits(event_type: str, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
     """Check if user has enough credits for an operation."""
     from app.services.analytics import get_analytics_service, CREDIT_COSTS
     analytics = get_analytics_service()

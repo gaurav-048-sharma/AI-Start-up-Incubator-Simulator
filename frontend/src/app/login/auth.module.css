@@ -211,4 +211,102 @@
     align-items: center;
     gap: var(--space-2);
   }
+
+  .mfaCodeContainer {
+    gap: 6px;
+  }
+
+  .mfaCodeInput {
+    width: 40px;
+    height: 48px;
+    font-size: 1.25rem;
+  }
+}
+
+/* ── MFA Verification Step ────────────────────────────────────── */
+
+.shieldIcon {
+  display: inline-block;
+  font-size: 3rem;
+  animation: shieldPulse 2s ease-in-out infinite;
+}
+
+@keyframes shieldPulse {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 8px rgba(99, 102, 241, 0.3)); }
+  50% { transform: scale(1.08); filter: drop-shadow(0 0 16px rgba(99, 102, 241, 0.5)); }
+}
+
+.mfaFactorName {
+  display: block;
+  color: var(--accent-tertiary);
+  font-size: var(--fs-xs);
+  margin-top: var(--space-1);
+  opacity: 0.8;
+}
+
+.mfaCodeContainer {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: var(--space-6) 0 var(--space-2);
+}
+
+.mfaCodeInput {
+  width: 48px;
+  height: 56px;
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  letter-spacing: 0;
+  border: 2px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+  caret-color: var(--accent-primary);
+}
+
+.mfaCodeInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), 0 0 20px rgba(99, 102, 241, 0.1);
+  background: var(--bg-elevated);
+  transform: translateY(-1px);
+}
+
+.mfaCodeInput:not(:placeholder-shown) {
+  border-color: var(--accent-secondary);
+}
+
+.mfaCodeInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mfaHelpText {
+  text-align: center;
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: rgba(99, 102, 241, 0.06);
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(99, 102, 241, 0.1);
+}
+
+.mfaHelpText p {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.mfaBackBtn {
+  width: 100%;
+  margin-top: var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--fs-sm);
+}
+
+.mfaBackBtn:hover {
+  color: var(--text-primary);
 }

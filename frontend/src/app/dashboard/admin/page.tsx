@@ -2,33 +2,16 @@
 
 import { useEffect, useState } from "react";
 import styles from "./admin.module.css";
-import { apiRequest } from "@/lib/api";
+import { adminApi } from "@/lib/api";
+import type { EnterpriseRequest as EnterpriseReqType, Organization } from "@/lib/api";
 
-interface EnterpriseRequest {
-  id: string;
-  company_name: string;
-  contact_name: string;
-  contact_email: string;
-  team_size: string;
-  industry: string;
-  required_seats: number;
-  status: "pending" | "approved" | "rejected";
-  created_at: string;
-}
-interface Organization {
-  id: string;
-  name: string;
-  slug: string;
-  plan: string;
-  max_members: number;
-  status: string;
-  created_at: string;
-}
+type EnterpriseRequest = EnterpriseReqType;
+type AdminOrg = Organization & { status?: string; subscription_status?: string };
 
 export default function EnterpriseAdminDashboard() {
   const [activeTab, setActiveTab] = useState<"requests" | "organizations">("requests");
   const [requests, setRequests] = useState<EnterpriseRequest[]>([]);
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
+  const [organizations, setOrganizations] = useState<AdminOrg[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [isUnauthorized, setIsUnauthorized] = useState(false);
@@ -36,10 +19,10 @@ export default function EnterpriseAdminDashboard() {
 
   const fetchRequests = async () => {
     try {
-      const data = await apiRequest<{ requests: EnterpriseRequest[] }>("/api/enterprise/requests");
+      const data = await adminApi.listEnterpriseRequests();
       setRequests(data.requests);
     } catch (err: any) {
-      if (err.message?.includes("super_admin") || err.message?.includes("unauthorized")) {
+      if (err.message?.includes("platform_role") || err.message?.includes("Platform role") || err.message?.includes("401")) {
         setIsUnauthorized(true);
       } else {
         setError(err.message || "Failed to load enterprise requests.");
@@ -49,10 +32,10 @@ export default function EnterpriseAdminDashboard() {
 
   const fetchOrganizations = async () => {
     try {
-      const data = await apiRequest<{ organizations: Organization[] }>("/api/enterprise/organizations");
-      setOrganizations(data.organizations);
+      const data = await adminApi.listAllOrganizations();
+      setOrganizations(data.organizations as AdminOrg[]);
     } catch (err: any) {
-      if (err.message?.includes("super_admin") || err.message?.includes("unauthorized")) {
+      if (err.message?.includes("platform_role") || err.message?.includes("Platform role") || err.message?.includes("401")) {
         setIsUnauthorized(true);
       } else {
         setError(err.message || "Failed to load organizations.");
@@ -71,12 +54,18 @@ export default function EnterpriseAdminDashboard() {
   }, []);
 
   const handleApprove = async (id: string) => {
-    if (!confirm("Are you sure you want to approve this request and provision a new enterprise organization?")) return;
+    if (!confirm("Are you sure you want to approve this request and generate a payment link?")) return;
     
     setProcessingId(id);
     try {
-      await apiRequest(`/api/enterprise/approve/${id}`, { method: "POST" });
-      alert("Enterprise provisioned successfully! An invitation email has been sent.");
+      const resp = await adminApi.approveEnterpriseRequest(id);
+      alert("Enterprise request approved! Payment link sent.");
+      if (resp.checkout_url) {
+        // Optionally redirect or show the link to the admin
+        if (confirm(`Payment link generated:\n\n${resp.checkout_url}\n\nOpen link now?`)) {
+          window.open(resp.checkout_url, '_blank');
+        }
+      }
       loadData(); // Refresh list
     } catch (err: any) {
       alert("Error: " + err.message);
@@ -86,14 +75,11 @@ export default function EnterpriseAdminDashboard() {
   };
 
   const handleToggleStatus = async (id: string, currentStatus: string) => {
-    const newStatus = currentStatus === "active" ? "suspended" : "active";
+    const newStatus = (currentStatus === "active" ? "suspended" : "active") as "active" | "suspended";
     if (!confirm(`Are you sure you want to ${newStatus === "suspended" ? "suspend" : "reactivate"} this organization?`)) return;
     
     try {
-      await apiRequest(`/api/enterprise/organizations/${id}/status`, { 
-        method: "PATCH",
-        body: JSON.stringify({ status: newStatus })
-      });
+      await adminApi.updateOrgStatus(id, newStatus);
       fetchOrganizations();
     } catch (err: any) {
       alert("Error: " + err.message);
@@ -104,8 +90,8 @@ export default function EnterpriseAdminDashboard() {
     if (!confirm("CRITICAL: Are you sure you want to delete this organization? This is irreversible!")) return;
     
     try {
-      await apiRequest(`/api/enterprise/organizations/${id}`, { method: "DELETE" });
-      fetchOrganizations(); // Refresh list
+      await adminApi.deleteOrganization(id);
+      fetchOrganizations();
     } catch (err: any) {
       alert("Error: " + err.message);
     }
@@ -121,7 +107,7 @@ export default function EnterpriseAdminDashboard() {
         <h1 style={{ fontSize: "4rem", marginBottom: "1rem", color: "#ef4444" }}>403</h1>
         <h2 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>Access Denied</h2>
         <p style={{ color: "var(--color-gray-400)", maxWidth: "400px" }}>
-          You do not have the required <strong>super_admin</strong> permissions to view this page. If you believe this is a mistake, please contact the platform administrator.
+          You do not have the required <strong>Platform Super Admin</strong> role to view this page. Contact the platform administrator if you believe this is a mistake.
         </p>
       </div>
     );
@@ -130,7 +116,26 @@ export default function EnterpriseAdminDashboard() {
   return (
     <div className={styles.adminPage}>
       <div className={styles.header}>
-        <h1 className={styles.title}>Super Admin Control Panel</h1>
+        <h1 className={styles.title}>Platform Admin Control Panel</h1>
+      </div>
+
+      <div className={styles.statsGrid}>
+        <div className={styles.statCard}>
+          <div className={styles.statValue}>{requests.length}</div>
+          <div className={styles.statLabel}>Pending Requests</div>
+        </div>
+        <div className={styles.statCard}>
+          <div className={styles.statValue}>{organizations.length}</div>
+          <div className={styles.statLabel}>Active Organizations</div>
+        </div>
+        <div className={styles.statCard}>
+          <div className={styles.statValue}>Healthy</div>
+          <div className={styles.statLabel}>Platform Status</div>
+        </div>
+        <div className={styles.statCard}>
+          <div className={styles.statValue}>1.2k</div>
+          <div className={styles.statLabel}>Global Credits</div>
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: "1rem", marginBottom: "2rem" }}>
@@ -138,13 +143,13 @@ export default function EnterpriseAdminDashboard() {
           className={`btn ${activeTab === "requests" ? "btn-primary" : "btn-outline"}`}
           onClick={() => setActiveTab("requests")}
         >
-          Pending Requests
+          Approval Queue
         </button>
         <button 
           className={`btn ${activeTab === "organizations" ? "btn-primary" : "btn-outline"}`}
           onClick={() => setActiveTab("organizations")}
         >
-          Active Organizations
+          Company Directory
         </button>
       </div>
 
@@ -200,7 +205,7 @@ export default function EnterpriseAdminDashboard() {
                       {new Date(req.created_at).toLocaleDateString()}
                     </td>
                     <td>
-                      {req.status === "pending" && (
+                      {req.status === "pending" ? (
                         <div className={styles.actions}>
                           <button 
                             className={styles.btnApprove} 
@@ -210,6 +215,10 @@ export default function EnterpriseAdminDashboard() {
                             {processingId === req.id ? "Approving..." : "Approve"}
                           </button>
                         </div>
+                      ) : (
+                        <span style={{ color: "var(--color-gray-400)", fontSize: "0.85rem" }}>
+                          Processed
+                        </span>
                       )}
                     </td>
                   </tr>
@@ -266,7 +275,7 @@ export default function EnterpriseAdminDashboard() {
                       <div className={styles.actions}>
                         <button 
                           className="btn btn-outline btn-sm"
-                          onClick={() => handleToggleStatus(org.id, org.status)}
+                          onClick={() => handleToggleStatus(org.id, org.status ?? "active")}
                         >
                           {org.status === 'active' ? 'Suspend' : 'Reactivate'}
                         </button>

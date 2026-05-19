@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS enterprise_requests (
     compliance_requirements TEXT,
     white_label_needs BOOLEAN DEFAULT false,
     billing_preferences TEXT,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'under_review', 'approved', 'rejected')),
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'under_review', 'pending_payment', 'approved', 'rejected')),
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()

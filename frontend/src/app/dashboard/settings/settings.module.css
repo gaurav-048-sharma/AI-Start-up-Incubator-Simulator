@@ -120,4 +120,417 @@
     gap: var(--space-3);
     text-align: center;
   }
+
+  .mfaQrContainer {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .mfaStatusCard {
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+
+  .mfaCodeContainer {
+    gap: 6px;
+  }
+
+  .mfaCodeInput {
+    width: 40px;
+    height: 48px;
+    font-size: 1.25rem;
+  }
+}
+
+/* ── MFA Section Styles ──────────────────────────────────────── */
+
+.mfaSectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-5);
+}
+
+.mfaActiveBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: var(--radius-full);
+  color: #22c55e;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mfaActiveDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+  animation: mfaDotPulse 2s ease-in-out infinite;
+}
+
+@keyframes mfaDotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.mfaRequiredBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-5);
+}
+
+.mfaRequiredBanner strong {
+  display: block;
+  font-size: var(--fs-sm);
+  color: #f59e0b;
+  margin-bottom: 2px;
+}
+
+.mfaRequiredBanner p {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.mfaErrorBanner {
+  padding: var(--space-3) var(--space-4);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-md);
+  color: var(--error);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.mfaEnableCard {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  padding: var(--space-5);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-lg);
+  border: 1px dashed var(--border-default);
+}
+
+.mfaEnableIcon {
+  font-size: 2.5rem;
+  flex-shrink: 0;
+}
+
+.mfaEnableContent {
+  flex: 1;
+}
+
+.mfaEnableContent h4 {
+  margin: 0 0 4px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.mfaEnableContent p {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.mfaStatusCard {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-5);
+  background: rgba(34, 197, 94, 0.04);
+  border: 1px solid rgba(34, 197, 94, 0.15);
+  border-radius: var(--radius-lg);
+}
+
+.mfaStatusInfo {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.mfaStatusIcon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.mfaStatusInfo h4 {
+  margin: 0 0 4px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.mfaStatusInfo p {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+
+.mfaFactorMeta {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+  opacity: 0.7;
+}
+
+.mfaMandatoryBadge {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+
+.mfaDisableConfirm {
+  text-align: right;
+}
+
+.mfaDisableConfirm p {
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  margin: 0 0 8px;
+}
+
+.mfaEnrollLoading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-8);
+}
+
+.mfaEnrollLoading p {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* Step wizard */
+.mfaSetupWizard {
+  margin-top: var(--space-2);
+}
+
+.mfaStepIndicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin-bottom: var(--space-6);
+}
+
+.mfaStep {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: all 0.3s ease;
+}
+
+.mfaStep span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--border-default);
+  transition: all 0.3s ease;
+}
+
+.mfaStepActive {
+  color: var(--accent-primary);
+}
+
+.mfaStepActive span {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.3);
+}
+
+.mfaStepDone {
+  color: #22c55e;
+}
+
+.mfaStepDone span {
+  background: #22c55e;
+  color: white;
+  border-color: #22c55e;
+}
+
+.mfaStepDivider {
+  width: 40px;
+  height: 2px;
+  background: var(--border-default);
+  margin: 0 4px;
+  transition: background 0.3s ease;
+}
+
+.mfaStepDividerDone {
+  background: #22c55e;
+}
+
+/* QR code */
+.mfaQrContainer {
+  display: flex;
+  gap: var(--space-6);
+  align-items: flex-start;
+}
+
+.mfaQrWrapper {
+  flex-shrink: 0;
+  padding: var(--space-4);
+  background: white;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.mfaQrImage {
+  display: block;
+  width: 200px;
+  height: 200px;
+  image-rendering: pixelated;
+}
+
+.mfaQrInstructions {
+  flex: 1;
+}
+
+.mfaQrInstructions h4 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.mfaQrInstructions ol {
+  margin: 0;
+  padding-left: var(--space-5);
+  font-size: var(--fs-xs);
+  color: var(--text-secondary);
+  line-height: 1.8;
+}
+
+.mfaSecretToggle {
+  margin-top: var(--space-4);
+}
+
+.mfaSecretDisplay {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-default);
+}
+
+.mfaSecretDisplay code {
+  font-size: var(--fs-xs);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.05em;
+  word-break: break-all;
+  color: var(--accent-tertiary);
+  flex: 1;
+}
+
+.mfaVerifyDesc {
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-4);
+}
+
+/* Code inputs in settings match login */
+.mfaCodeContainer {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: var(--space-4) 0;
+}
+
+.mfaCodeInput {
+  width: 48px;
+  height: 56px;
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  border: 2px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  transition: all 0.2s ease;
+  caret-color: var(--accent-primary);
+}
+
+.mfaCodeInput:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15), 0 0 20px rgba(99, 102, 241, 0.1);
+  background: var(--bg-elevated);
+  transform: translateY(-1px);
+}
+
+.mfaCodeInput:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Success */
+.mfaSuccessCard {
+  text-align: center;
+  padding: var(--space-6);
+  background: rgba(34, 197, 94, 0.06);
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(34, 197, 94, 0.15);
+  animation: mfaSuccessAppear 0.5s ease;
+}
+
+@keyframes mfaSuccessAppear {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.mfaSuccessIcon {
+  font-size: 3rem;
+  margin-bottom: var(--space-3);
+}
+
+.mfaSuccessCard h4 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-lg);
+  color: #22c55e;
+  font-weight: 600;
+}
+
+.mfaSuccessCard p {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
 }

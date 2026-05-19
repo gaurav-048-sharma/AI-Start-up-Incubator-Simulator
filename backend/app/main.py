@@ -1,6 +1,11 @@
 """
 FastAPI application entry point for the AI Start-up Incubator Simulator.
 Configures CORS, security middleware, routes, WebSocket endpoints, and application lifecycle.
+
+Router architecture:
+  /api/*           — Tenant-scoped workspace API (ideas, agents, reports, etc.)
+  /api/admin/*     — Platform admin API (enterprise requests, global org management)
+  /api/billing/*   — Billing (Stripe checkout/webhooks)
 """
 
 import structlog
@@ -12,11 +17,13 @@ from app.config import get_settings
 from app.api.routes import ideas, agents, workflows, simulation, reports
 from app.api.routes import analytics, notifications, settings as settings_routes, comparison
 from app.api.routes import organizations as org_routes, enterprise
+from app.api.routes import mfa as mfa_routes
 from app.api.websockets import router as ws_router
 from app.middleware.security import (
     RateLimitMiddleware,
     RequestIDMiddleware,
     TimingMiddleware,
+    TenantContextMiddleware,
 )
 
 logger = structlog.get_logger()
@@ -89,6 +96,7 @@ def create_app() -> FastAPI:
     # ── Security Middleware (order matters — outermost first) ────
     app.add_middleware(TimingMiddleware)
     app.add_middleware(RequestIDMiddleware)
+    app.add_middleware(TenantContextMiddleware)
     app.add_middleware(
         RateLimitMiddleware,
         requests_per_minute=settings.rate_limit_rpm,
@@ -101,10 +109,12 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         allow_headers=["*"],
-        expose_headers=["X-Request-ID", "X-Response-Time", "X-RateLimit-Remaining"],
+        expose_headers=[
+            "X-Request-ID", "X-Response-Time", "X-RateLimit-Remaining",
+        ],
     )
 
-    # ── API Routes ───────────────────────────────────────────────
+    # ── Tenant API Routes (workspace-scoped) ─────────────────────
     app.include_router(ideas.router, prefix="/api/ideas", tags=["Ideas"])
     app.include_router(agents.router, prefix="/api/agents", tags=["Agents"])
     app.include_router(workflows.router, prefix="/api/workflows", tags=["Workflows"])
@@ -115,10 +125,19 @@ def create_app() -> FastAPI:
     app.include_router(settings_routes.router, prefix="/api/settings", tags=["Settings"])
     app.include_router(comparison.router, prefix="/api/ideas", tags=["Comparison"])
     app.include_router(org_routes.router, prefix="/api/organizations", tags=["Organizations"])
-    app.include_router(enterprise.router, prefix="/api/enterprise", tags=["Enterprise"])
     app.include_router(ws_router, tags=["WebSocket"])
 
-    # ── Billing Routes (plans always available, checkout needs Stripe) ─
+    # ── Platform Admin API Routes ────────────────────────────────
+    # All endpoints under /api/admin require platform_role: super_admin or support
+    app.include_router(enterprise.router, prefix="/api/admin", tags=["Platform Admin"])
+
+    # Legacy compatibility: keep /api/enterprise pointing to same router
+    app.include_router(enterprise.router, prefix="/api/enterprise", tags=["Enterprise (Legacy)"])
+
+    # ── MFA / Auth Routes ────────────────────────────────────────
+    app.include_router(mfa_routes.router, prefix="/api/auth", tags=["Authentication"])
+
+    # ── Billing Routes ───────────────────────────────────────────
     try:
         from app.api.routes.billing import router as billing_router
         app.include_router(billing_router, prefix="/api/billing", tags=["Billing"])
@@ -183,3 +202,4 @@ if __name__ == "__main__":
         reload=settings.debug,
         log_level="debug" if settings.debug else "info",
     )
+ 
