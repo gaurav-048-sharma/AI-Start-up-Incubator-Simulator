@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.api.routes import ideas, agents, workflows, simulation, reports
 from app.api.routes import analytics, notifications, settings as settings_routes, comparison
 from app.api.routes import organizations as org_routes, enterprise
+from app.api.routes import me as me_routes
 from app.api.routes import mfa as mfa_routes
 from app.api.websockets import router as ws_router
 from app.middleware.security import (
@@ -53,9 +54,11 @@ async def lifespan(app: FastAPI):
     # Initialize Sentry (optional)
     if settings.sentry_dsn:
         try:
-            import sentry_sdk
-            from sentry_sdk.integrations.fastapi import FastApiIntegration
-            from sentry_sdk.integrations.starlette import StarletteIntegration
+            from importlib import import_module
+
+            sentry_sdk = import_module("sentry_sdk")
+            FastApiIntegration = import_module("sentry_sdk.integrations.fastapi").FastApiIntegration
+            StarletteIntegration = import_module("sentry_sdk.integrations.starlette").StarletteIntegration
 
             sentry_sdk.init(
                 dsn=settings.sentry_dsn,
@@ -125,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(settings_routes.router, prefix="/api/settings", tags=["Settings"])
     app.include_router(comparison.router, prefix="/api/ideas", tags=["Comparison"])
     app.include_router(org_routes.router, prefix="/api/organizations", tags=["Organizations"])
+    app.include_router(me_routes.router, prefix="/api/me", tags=["Identity"])
     app.include_router(ws_router, tags=["WebSocket"])
 
     # ── Platform Admin API Routes ────────────────────────────────

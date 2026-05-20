@@ -24,7 +24,7 @@ class IdeaStatus(str, Enum):
 
 
 class UserRole(str, Enum):
-    """Platform-wide user roles with hierarchy."""
+    """Tenant-scoped user roles with hierarchy."""
     VIEWER = "viewer"
     TEAM_MEMBER = "team_member"
     FOUNDER = "founder"
@@ -118,6 +118,7 @@ class ProfileResponse(BaseModel):
     full_name: Optional[str] = None
     avatar_url: Optional[str] = None
     company_name: Optional[str] = None
+    current_org_id: Optional[Union[str, UUID]] = None
     role: str = "founder"
     platform_role: str = "user"
     tier: str = "free"

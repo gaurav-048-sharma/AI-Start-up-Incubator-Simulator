@@ -8,13 +8,11 @@ import structlog
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from typing import Optional
-import uuid
-import secrets
+# uuid imported locally where needed (e.g. in billing webhook handler)
 
 from app.models.database import get_db_service
 from app.middleware.security import (
     require_platform_role,
-    get_current_user,
     require_mfa_stepup,
     log_audit_event,
 )
@@ -160,6 +158,44 @@ async def approve_enterprise_request(
     except Exception as e:
         logger.error("Failed to approve enterprise request", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to approve enterprise request")
+
+
+@router.post("/provision/{request_id}")
+async def provision_enterprise_request(
+    request_id: str,
+    request: Request,
+    user: dict = Depends(require_mfa_stepup()),
+    _role: dict = Depends(require_platform_role("super_admin")),
+):
+    """
+    Provision an enterprise org immediately from a paid enterprise_request.
+    Super admin only. This calls a server-side RPC that validates approval and creates the org.
+    """
+    db = get_db_service()
+    try:
+        # Call RPC - server key must have execute privileges
+        res = db._client.rpc("create_organization_from_request", {"req_id": request_id, "approver_id": user["id"]}).execute()
+        # Supabase returns result in res.data for RPC calls
+        new_org_id = None
+        if hasattr(res, 'data') and res.data:
+            # Could be a list or scalar
+            if isinstance(res.data, list):
+                new_org_id = res.data[0]
+            else:
+                new_org_id = res.data
+
+        await log_audit_event(
+            user_id=user["id"],
+            action="provision_enterprise_request",
+            resource_type="enterprise_request",
+            resource_id=request_id,
+            details={"new_org_id": new_org_id},
+            request=request,
+        )
+        return {"status": "success", "org_id": new_org_id}
+    except Exception as e:
+        logger.error("Failed to provision enterprise org", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to provision enterprise org")
 
 
 @router.post("/reject/{request_id}")

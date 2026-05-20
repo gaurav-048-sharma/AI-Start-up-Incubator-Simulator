@@ -16,7 +16,13 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
-from app.middleware.security import get_current_user, security_scheme, current_jwt
+from app.middleware.security import (
+    get_current_user,
+    security_scheme,
+    current_jwt,
+    has_role_level,
+    resolve_effective_org_role,
+)
 from app.config import get_settings
 
 logger = structlog.get_logger()
@@ -362,7 +368,11 @@ async def mfa_status(user: dict = Depends(get_current_user)):
     is_dev = settings.debug or settings.environment == "development"
     
     # Hide MFA required banner in development
-    is_privileged = user.get("platform_role") in ("super_admin", "billing_admin") or user.get("org_role") == "admin"
+    effective_role = resolve_effective_org_role(user)
+    is_privileged = (
+        user.get("platform_role") in ("super_admin", "billing_admin")
+        or has_role_level(effective_role, "admin")
+    )
     mfa_required = False if is_dev else is_privileged
 
     return {
@@ -374,6 +384,7 @@ async def mfa_status(user: dict = Depends(get_current_user)):
             "super_admin": "hard_block",
             "billing_admin": "hard_block",
             "org_admin": "hard_block",
+            "workspace_owner": "hard_block",
             "other": "optional",
         },
     }

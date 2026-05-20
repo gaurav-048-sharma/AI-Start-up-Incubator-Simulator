@@ -17,6 +17,9 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone
 
+import app.models.database as database
+from app.models.database import get_db_service
+
 from app.middleware.security import (
     get_current_user,
     require_minimum_role,
@@ -28,6 +31,8 @@ from app.middleware.security import (
     ROLE_HIERARCHY,
     ROLE_DESCRIPTIONS,
     TENANT_ROLE_HIERARCHY,
+    ASSIGNABLE_TENANT_ROLES,
+    WORKSPACE_OWNER_ROLE,
     require_org_context,
 )
 
@@ -79,6 +84,7 @@ class SSOConfigUpdateRequest(BaseModel):
 @router.get("/roles")
 async def list_roles():
     """List all available tenant roles with descriptions and hierarchy levels."""
+    # Return the combined ROLE_HIERARCHY so platform-level roles like super_admin are included
     return {
         "roles": [
             {
@@ -86,8 +92,10 @@ async def list_roles():
                 "label": role.replace("_", " ").title(),
                 "level": level,
                 "description": ROLE_DESCRIPTIONS.get(role, ""),
+                "assignable": role in ASSIGNABLE_TENANT_ROLES,
             }
-            for role, level in sorted(TENANT_ROLE_HIERARCHY.items(), key=lambda x: x[1])
+            for role, level in sorted(ROLE_HIERARCHY.items(), key=lambda x: x[1])
+            if role != WORKSPACE_OWNER_ROLE
         ]
     }
 
@@ -105,18 +113,60 @@ async def create_org(
     Restricted to enterprise-tier users or platform super_admins.
     The creator becomes the org admin (tenant-scoped, NOT platform admin).
     """
-    from app.models.database import get_db_service
     db = get_db_service()
 
-    # Gate: only enterprise users or platform super_admins can create orgs
-    if user.get("platform_role") != "super_admin":
-        user_tier = user.get("tier", "free")
-        if user_tier not in ("enterprise",):
-            raise HTTPException(
-                status_code=403,
-                detail="Organization creation requires an Enterprise subscription. "
-                       "Upgrade at /dashboard/settings or submit an enterprise request.",
-            )
+    # Gate: platform super_admins bypass. For root org creation (no parent_id),
+    # the user must be on an Enterprise tier. For child org creation (parent_id
+    # provided), allow tenant admins/owners of the parent org to create the child.
+    if user.get("platform_role") == "super_admin":
+        pass
+    else:
+        if body.parent_id:
+            # Verify the user is an admin/incubator_manager or owner of the parent org
+            try:
+                member = (
+                    db._client.table("organization_members")
+                    .select("role")
+                    .eq("organization_id", body.parent_id)
+                    .eq("user_id", user["id"])
+                    .single()
+                    .execute()
+                )
+                owner_check = (
+                    db._client.table("organizations")
+                    .select("owner_id")
+                    .eq("id", body.parent_id)
+                    .single()
+                    .execute()
+                )
+
+                is_owner = False
+                member_role = None
+                if owner_check.data and owner_check.data.get("owner_id") == user["id"]:
+                    is_owner = True
+                    member_role = WORKSPACE_OWNER_ROLE
+                elif member.data:
+                    member_role = member.data.get("role")
+
+                if not (is_owner or (member_role in ("admin", "incubator_manager"))):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Only organization admins or owners may create sub-organizations.",
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.warning("Parent org verification failed", error=str(e), parent_id=body.parent_id)
+                raise HTTPException(status_code=403, detail="Unable to verify parent organization permissions")
+        else:
+            # Root org creation: require enterprise tier
+            user_tier = user.get("tier", "free")
+            if user_tier not in ("enterprise",):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Organization creation requires an Enterprise subscription. "
+                           "Upgrade at /dashboard/settings or submit an enterprise request.",
+                )
 
     org_id = str(uuid.uuid4())
     try:
@@ -133,7 +183,8 @@ async def create_org(
         }
         result = db._client.table("organizations").insert(org_data).execute()
 
-        # Add creator as org admin (TENANT role only)
+        # Add creator as org admin (TENANT role only) — must use admin client due to RLS
+        admin_client = database.get_supabase_client(admin=True)
         membership = {
             "id": str(uuid.uuid4()),
             "organization_id": org_id,
@@ -141,7 +192,7 @@ async def create_org(
             "role": "admin",
             "joined_at": datetime.now(timezone.utc).isoformat(),
         }
-        db._client.table("organization_members").insert(membership).execute()
+        admin_client.table("organization_members").insert(membership).execute()
 
         await log_audit_event(
             user_id=user["id"],
@@ -164,7 +215,6 @@ async def create_org(
 @router.get("")
 async def list_my_orgs(user: dict = Depends(get_current_user)):
     """List organizations the current user belongs to. Super admins see all."""
-    from app.models.database import get_db_service
     db = get_db_service()
 
     try:
@@ -175,16 +225,29 @@ async def list_my_orgs(user: dict = Depends(get_current_user)):
                 .select("id, name, slug, logo_url, plan, owner_id, subscription_status, created_at")
                 .execute()
             )
-            return {
-                "organizations": [
-                    {
-                        **org,
-                        "my_role": "super_admin",
-                        "is_owner": org.get("owner_id") == user["id"],
-                    }
-                    for org in (result.data or [])
-                ]
-            }
+            orgs = result.data or []
+            # Fetch member counts for each org for super_admin insight
+            enriched = []
+            for org in orgs:
+                try:
+                    members = (
+                        db._client.table("organization_members")
+                        .select("id", count="exact")
+                        .eq("organization_id", org.get("id"))
+                        .execute()
+                    )
+                    member_count = members.count or 0
+                except Exception:
+                    member_count = 0
+
+                enriched.append({
+                    **org,
+                    "my_role": "super_admin",
+                    "is_owner": org.get("owner_id") == user["id"],
+                    "member_count": member_count,
+                })
+
+            return {"organizations": enriched}
 
         # Regular users only see orgs they are members of
         result = (
@@ -193,22 +256,24 @@ async def list_my_orgs(user: dict = Depends(get_current_user)):
             .eq("user_id", user["id"])
             .execute()
         )
-        return {
-            "organizations": [
-                {
-                    "id": m["organizations"]["id"],
-                    "name": m["organizations"]["name"],
-                    "slug": m["organizations"]["slug"],
-                    "logo_url": m["organizations"].get("logo_url"),
-                    "plan": m["organizations"]["plan"],
-                    "subscription_status": m["organizations"].get("subscription_status", "active"),
-                    "my_role": m["role"],
-                    "is_owner": m["organizations"].get("owner_id") == user["id"],
-                }
-                for m in (result.data or [])
-                if m.get("organizations")
-            ]
-        }
+        organizations = []
+        for m in (result.data or []):
+            if not m.get("organizations"):
+                continue
+            org = m["organizations"]
+            is_owner = org.get("owner_id") == user["id"]
+            organizations.append({
+                "id": org["id"],
+                "name": org["name"],
+                "slug": org["slug"],
+                "logo_url": org.get("logo_url"),
+                "plan": org["plan"],
+                "subscription_status": org.get("subscription_status", "active"),
+                "my_role": WORKSPACE_OWNER_ROLE if is_owner else m["role"],
+                "is_owner": is_owner,
+            })
+
+        return {"organizations": organizations}
     except Exception as e:
         logger.error("Failed to list orgs", error=str(e))
         return {"organizations": []}
@@ -229,6 +294,7 @@ async def get_org(org_id: str, user: dict = Depends(get_current_user)):
         my_role = None
         if user.get("platform_role") == "super_admin":
             my_role = "super_admin"
+            is_owner = False
         else:
             member = (
                 db._client.table("organization_members")
@@ -240,7 +306,8 @@ async def get_org(org_id: str, user: dict = Depends(get_current_user)):
             )
             if not member.data:
                 raise HTTPException(status_code=403, detail="You are not a member of this organization")
-            my_role = member.data["role"]
+            is_owner = org.data.get("owner_id") == user["id"]
+            my_role = WORKSPACE_OWNER_ROLE if is_owner else member.data["role"]
 
         # Get member count
         members = (
@@ -254,6 +321,7 @@ async def get_org(org_id: str, user: dict = Depends(get_current_user)):
             **org.data,
             "my_role": my_role,
             "member_count": members.count or 0,
+            "is_owner": is_owner,
         }
     except HTTPException:
         raise
@@ -400,7 +468,7 @@ async def update_member_role(
     db = get_db_service()
 
     # Validate the role is a valid TENANT role (not a platform role)
-    if body.role not in TENANT_ROLE_HIERARCHY:
+    if body.role not in ASSIGNABLE_TENANT_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid tenant role: {body.role}")
 
     # Can't assign a role higher than your own (within tenant scope)
@@ -410,7 +478,8 @@ async def update_member_role(
         raise HTTPException(status_code=403, detail="Cannot assign a role higher than your own")
 
     try:
-        db._client.table("organization_members").update(
+        admin_client = database.get_supabase_client(admin=True)
+        admin_client.table("organization_members").update(
             {"role": body.role}
         ).eq("organization_id", org_id).eq("user_id", member_user_id).execute()
 
@@ -439,14 +508,14 @@ async def remove_member(
     _role: dict = Depends(require_minimum_role("admin")),
 ):
     """Remove a member from the organization (org admin+ only)."""
-    from app.models.database import get_db_service
     db = get_db_service()
 
     if member_user_id == user["id"]:
         raise HTTPException(status_code=400, detail="Cannot remove yourself. Transfer ownership first.")
 
     try:
-        db._client.table("organization_members").delete().eq(
+        admin_client = database.get_supabase_client(admin=True)
+        admin_client.table("organization_members").delete().eq(
             "organization_id", org_id
         ).eq("user_id", member_user_id).execute()
 
@@ -476,10 +545,9 @@ async def create_invitation(
     _perm: dict = Depends(require_permission("invite_members")),
 ):
     """Send an invitation to join the organization."""
-    from app.models.database import get_db_service
     db = get_db_service()
 
-    if body.role not in TENANT_ROLE_HIERARCHY:
+    if body.role not in ASSIGNABLE_TENANT_ROLES:
         raise HTTPException(status_code=400, detail=f"Invalid tenant role: {body.role}")
 
     # Check seat limits
@@ -487,11 +555,11 @@ async def create_invitation(
         org = db._client.table("organizations").select("max_members").eq("id", org_id).single().execute()
         if org.data:
             current_members = (
-                db._client.table("organization_members")
-                .select("id", count="exact")
-                .eq("organization_id", org_id)
-                .execute()
-            )
+                    db._client.table("organization_members")
+                    .select("id", count="exact")
+                    .eq("organization_id", org_id)
+                    .execute()
+                )
             if current_members.count and org.data.get("max_members"):
                 if current_members.count >= org.data["max_members"]:
                     raise HTTPException(
@@ -578,6 +646,10 @@ async def accept_invitation(token: str, user: dict = Depends(get_current_user)):
         db._client.table("organization_members").insert(membership).execute()
 
         # Update invitation status
+        # Insert membership using admin client due to RLS restrictions
+        admin_client = database.get_supabase_client(admin=True)
+        admin_client.table("organization_members").insert(membership).execute()
+
         db._client.table("invitations").update(
             {"status": "accepted"}
         ).eq("id", inv.data["id"]).execute()

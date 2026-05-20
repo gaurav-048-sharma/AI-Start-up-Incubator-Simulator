@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react";
 import styles from "./team.module.css";
-import { organizationsApi, type Organization, type OrgMember, type RoleInfo } from "@/lib/api";
+import { authApi, organizationsApi, setActiveOrg, type Organization, type OrgMember, type RoleInfo } from "@/lib/api";
 
 export default function TeamPage() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
@@ -28,15 +28,15 @@ export default function TeamPage() {
   const [parentOrgIdForNew, setParentOrgIdForNew] = useState<string | null>(null);
 
   const [childMembersCache, setChildMembersCache] = useState<Record<string, OrgMember[]>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [canCreateAllowed, setCanCreateAllowed] = useState<boolean | null>(null);
+  const [canInviteAllowed, setCanInviteAllowed] = useState<boolean | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const profileStr = localStorage.getItem("user_profile");
-        if (profileStr) {
-          const profile = JSON.parse(profileStr);
-          setIsSuperAdmin(profile.platform_role === "super_admin");
-        }
+        const me = await authApi.me();
+        setIsSuperAdmin(me.platform_role === "super_admin");
 
         const [orgsData, rolesData] = await Promise.all([
           organizationsApi.list(),
@@ -47,9 +47,10 @@ export default function TeamPage() {
         setRoles(rolesData.roles || []);
         
         if (orgsData.organizations && orgsData.organizations.length > 0) {
-          const roots = orgsData.organizations.filter(o => !o.parent_id);
-          if (roots.length > 0) setSelectedOrgId(roots[0].id);
-          else setSelectedOrgId(orgsData.organizations[0].id);
+          const preferred = orgsData.organizations.find(o => o.id === me.current_org_id)
+            || orgsData.organizations.find(o => !o.parent_id)
+            || orgsData.organizations[0];
+          if (preferred) setSelectedOrgId(preferred.id);
         }
       } catch (err) {
         console.error("Failed to load platform data:", err);
@@ -66,12 +67,33 @@ export default function TeamPage() {
 
   useEffect(() => {
     if (selectedOrgId) {
-      if (selectedOrg && !selectedOrg.parent_id) {
-        // If it's a root org, fetch its own members (if any) and trigger fetches for its children
-        organizationsApi.getMembers(selectedOrgId)
-          .then(data => setMembers(data.members || []))
-          .catch(console.error);
+      setActiveOrg(selectedOrgId);
 
+      // Refresh authoritative org details (my_role, member_count)
+      organizationsApi.get(selectedOrgId)
+        .then((orgData: Organization) => {
+          setOrgs(prev => {
+            const found = prev.find(o => o.id === orgData.id);
+            if (found) return prev.map(p => (p.id === orgData.id ? { ...p, ...orgData } : p));
+            return [...prev, orgData as Organization];
+          });
+
+          const role = orgData.my_role;
+          const isAdmin = role === "admin" || role === "incubator_manager" || role === "workspace_owner";
+          setCanCreateAllowed(Boolean(orgData && !orgData.parent_id && isAdmin && !isSuperAdmin));
+          setCanInviteAllowed(Boolean(orgData && orgData.parent_id && isAdmin && !isSuperAdmin));
+        })
+        .catch(err => {
+          console.error("Failed to refresh org details:", err);
+        });
+
+      // Fetch members for the selected org
+      organizationsApi.getMembers(selectedOrgId)
+        .then(data => setMembers(data.members || []))
+        .catch(console.error);
+
+      // If selected is a root, fetch child members as well
+      if (selectedOrg && !selectedOrg.parent_id) {
         const childrenOfRoot = childOrgs.filter(c => c.parent_id === selectedOrgId);
         childrenOfRoot.forEach(child => {
           organizationsApi.getMembers(child.id)
@@ -82,16 +104,22 @@ export default function TeamPage() {
               console.error("Child org member fetch failed (likely auth):", err);
             });
         });
-      } else {
-        // Just a regular child org
-        organizationsApi.getMembers(selectedOrgId)
-          .then(data => setMembers(data.members || []))
-          .catch(console.error);
       }
     } else {
-      setMembers([]);
+      // Defer clearing to avoid synchronous setState in an effect
+      setTimeout(() => {
+        setMembers([]);
+        setCanCreateAllowed(null);
+        setCanInviteAllowed(null);
+      }, 0);
     }
-  }, [selectedOrgId, selectedOrg, childOrgs]);
+  }, [selectedOrgId, selectedOrg, childOrgs, isSuperAdmin]);
+
+
+  // Clear previous action errors when selection changes (deferred)
+  useEffect(() => {
+    if (selectedOrgId) setTimeout(() => setActionError(null), 0);
+  }, [selectedOrgId]);
 
   // Governance Logic Check
   const myRoleInSelected = selectedOrg?.my_role;
@@ -106,14 +134,21 @@ export default function TeamPage() {
   const handleCreateOrg = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newOrgName) return;
+    setActionError(null);
     try {
       const slug = newOrgName.toLowerCase().replace(/ /g, "-");
       const created = await organizationsApi.create(newOrgName, slug, parentOrgIdForNew || undefined);
       setOrgs(prev => [...prev, created as Organization]);
       setShowCreate(false);
       setNewOrgName("");
+      setCanCreateAllowed(true);
     } catch (err) {
-      alert("Failed to create organization. Check permissions.");
+      const msg = err instanceof Error ? err.message : "Failed to create organization";
+      setActionError(msg);
+      if (msg.toLowerCase().includes("403") || msg.toLowerCase().includes("access denied") || msg.toLowerCase().includes("requires")) {
+        setCanCreateAllowed(false);
+      }
+      alert(msg);
     }
   };
 
@@ -121,14 +156,21 @@ export default function TeamPage() {
     e.preventDefault();
     if (!selectedOrgId) return;
     setInviting(true);
+    setActionError(null);
     try {
       const result = await organizationsApi.invite(selectedOrgId, inviteEmail, inviteRole);
       setInviteLink(window.location.origin + result.invite_url);
       setInviteEmail("");
       const data = await organizationsApi.getMembers(selectedOrgId);
       setMembers(data.members || []);
+      setCanInviteAllowed(true);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to send invitation");
+      const msg = err instanceof Error ? err.message : "Failed to send invitation";
+      setActionError(msg);
+      if (msg.toLowerCase().includes("403") || msg.toLowerCase().includes("access denied") || msg.toLowerCase().includes("invite")) {
+        setCanInviteAllowed(false);
+      }
+      alert(msg);
     } finally {
       setInviting(false);
     }
@@ -174,6 +216,9 @@ export default function TeamPage() {
                       <div className={styles.orgBadges}>
                         <span className={styles.roleBadge}>HUB</span>
                         <span className={styles.planBadge}>{org.plan}</span>
+                        {typeof org.member_count !== "undefined" && (
+                            <span className={styles.countBadge}>{org.member_count} members</span>
+                          )}
                       </div>
                     </div>
                   </div>
@@ -208,8 +253,13 @@ export default function TeamPage() {
                     <span className={styles.roleBadge}>{org.my_role?.replace(/_/g, " ")}</span>
                     <span className={styles.planBadge}>DEPARTMENT</span>
                   </div>
+                  {typeof org.member_count !== "undefined" && (
+                    <div className={styles.metaTextSmall}>
+                      {org.member_count} members
+                    </div>
+                  )}
                   {org.parent_id && (
-                    <div style={{ fontSize: "0.65rem", color: "var(--color-gray-500)", marginTop: "4px" }}>
+                    <div className={styles.metaTextTiny}>
                       Managed by {rootOrgs.find(r => r.id === org.parent_id)?.name || "Corporate Hub"}
                     </div>
                   )}
@@ -225,6 +275,9 @@ export default function TeamPage() {
       {/* Details Section for Selected Org */}
       {selectedOrg && (
         <div className={styles.detailsSection}>
+            {actionError && (
+              <div className={styles.actionError}>{actionError}</div>
+            )}
           <div className={styles.sectionHeader}>
             <div>
               <h3 className={styles.sectionTitle}>Enterprise SSO Configuration (SAML/OIDC)</h3>
@@ -232,32 +285,32 @@ export default function TeamPage() {
             </div>
           </div>
           
-          <form style={{ marginBottom: "2rem", paddingBottom: "2rem", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-            <div className="form-group-row" style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
-              <div className="form-group" style={{ flex: 1 }}>
-                <label style={{ fontSize: "0.8rem", color: "var(--color-gray-400)", display: "block", marginBottom: "4px" }}>Provider Name</label>
-                <input className="input" placeholder="e.g. okta, azure_ad" disabled={isSuperAdmin} />
+          <form className={styles.ssoForm}>
+            <div className={styles.formRow}>
+              <div className={`form-group ${styles.formGroupFlex1}`}>
+                <label className={styles.labelMuted} htmlFor="sso_provider">Provider Name</label>
+                <input id="sso_provider" className="input" placeholder="e.g. okta, azure_ad" disabled={isSuperAdmin} />
               </div>
-              <div className="form-group" style={{ flex: 1 }}>
-                <label style={{ fontSize: "0.8rem", color: "var(--color-gray-400)", display: "block", marginBottom: "4px" }}>Entity ID</label>
-                <input className="input" placeholder="IdP Entity ID" disabled={isSuperAdmin} />
+              <div className={`form-group ${styles.formGroupFlex1}`}>
+                <label className={styles.labelMuted} htmlFor="sso_entity">Entity ID</label>
+                <input id="sso_entity" className="input" placeholder="IdP Entity ID" disabled={isSuperAdmin} />
               </div>
             </div>
             
-            <div className="form-group-row" style={{ display: "flex", gap: "1rem", alignItems: "flex-end" }}>
-               <div className="form-group" style={{ flex: 1.5 }}>
-                 <label style={{ fontSize: "0.8rem", color: "var(--color-gray-400)", display: "block", marginBottom: "4px" }}>ACS URL</label>
-                 <input className="input" placeholder="Assertion Consumer Service URL" disabled={isSuperAdmin} />
+            <div className={`${styles.formRow} ${styles.formRowEnd}`}>
+              <div className={`form-group ${styles.formGroupFlex1_5}`}>
+                 <label className={styles.labelMuted} htmlFor="sso_acs">ACS URL</label>
+                 <input id="sso_acs" className="input" placeholder="Assertion Consumer Service URL" disabled={isSuperAdmin} />
                </div>
-               <div className="form-group" style={{ flex: 1, display: "flex", alignItems: "center", gap: "8px", height: "40px" }}>
+               <div className={`form-group ${styles.formGroupFlex1} ${styles.formGroupInlineCenter}`}>
                  <input type="checkbox" id="sso_enforce" disabled={isSuperAdmin} />
-                 <label htmlFor="sso_enforce" style={{ color: "white", fontSize: "0.9rem" }}>Enforce SSO Login for all members</label>
+                 <label htmlFor="sso_enforce" className={styles.ssoEnforceLabel}>Enforce SSO Login for all members</label>
                </div>
             </div>
 
             {!isSuperAdmin && (
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1rem" }}>
-                <button type="button" className="btn btn-primary" style={{ padding: "0.5rem 1.5rem" }}>Save SSO Settings</button>
+              <div className={styles.ssoSaveWrap}>
+                <button type="button" className={`btn btn-primary ${styles.ssoSaveBtn}`}>Save SSO Settings</button>
               </div>
             )}
           </form>
@@ -270,7 +323,7 @@ export default function TeamPage() {
                    <h3 className={styles.sectionTitle}>Hub Infrastructure</h3>
                    <p className={styles.subtitle}>Overview of all departments and members under {selectedOrg.name}.</p>
                  </div>
-                 {canCreateDept && (
+                 {canCreateDept && canCreateAllowed !== false && (
                    <button 
                      className="btn btn-primary"
                      onClick={() => { 
@@ -282,20 +335,23 @@ export default function TeamPage() {
                      + Create Department
                    </button>
                  )}
+                 {canCreateDept && canCreateAllowed === false && (
+                   <button className="btn btn-secondary" disabled title="You don't have permission to create a department here">Create Department (no permission)</button>
+                 )}
                </div>
 
                {childOrgs.filter(c => c.parent_id === selectedOrg.id).length === 0 ? (
-                 <p style={{ color: "var(--color-gray-500)", padding: "1rem", fontStyle: "italic" }}>No departments currently assigned under this Hub.</p>
+                 <p className={styles.emptyNote}>No departments currently assigned under this Hub.</p>
                ) : (
                  childOrgs.filter(c => c.parent_id === selectedOrg.id).map(child => (
-                   <div key={child.id} style={{ marginBottom: "2rem", background: "rgba(0,0,0,0.2)", padding: "1.5rem", borderRadius: "12px", border: "1px solid rgba(255,255,255,0.05)" }}>
-                     <h4 style={{ color: "var(--color-white)", margin: "0 0 1rem 0", fontSize: "1.1rem", display: "flex", alignItems: "center", gap: "8px" }}>
+                   <div key={child.id} className={styles.childCard}>
+                     <h4 className={styles.childHeader}>
                        📁 {child.name} 
-                       <span style={{ fontSize: "0.7rem", padding: "2px 6px", background: "rgba(16, 185, 129, 0.1)", color: "#10b981", borderRadius: "4px" }}>DEPARTMENT</span>
+                       <span className={styles.departmentBadge}>DEPARTMENT</span>
                      </h4>
                      <div className={styles.membersList}>
                        {(childMembersCache[child.id] || []).length === 0 ? (
-                         <p style={{ color: "var(--color-gray-500)", padding: "0.5rem" }}>No active members.</p>
+                         <p className={styles.noActiveMembers}>No active members.</p>
                        ) : (
                          (childMembersCache[child.id] || []).map(m => (
                            <div key={m.user_id} className={styles.memberRow}>
@@ -323,7 +379,7 @@ export default function TeamPage() {
                          : "Manage your department's human capital below."}
                    </p>
                  </div>
-                 {canInvite && (
+                 {canInvite && canInviteAllowed !== false && (
                    <button 
                      className="btn btn-primary"
                      onClick={() => { setShowInvite(true); setInviteLink(""); }}
@@ -331,11 +387,14 @@ export default function TeamPage() {
                      + Invite Member
                    </button>
                  )}
+                 {canInvite && canInviteAllowed === false && (
+                   <button className="btn btn-secondary" disabled title="You don't have permission to invite members here">Invite Member (no permission)</button>
+                 )}
                </div>
 
                <div className={styles.membersList}>
                  {members.length === 0 ? (
-                   <p style={{ color: "var(--color-gray-500)", padding: "1rem" }}>No members found in this unit.</p>
+                   <p className={styles.emptyNote}>No members found in this unit.</p>
                  ) : (
                    members.map(m => (
                      <div key={m.user_id} className={styles.memberRow}>
@@ -362,23 +421,23 @@ export default function TeamPage() {
               <div className={styles.successBox}>
                 <p>Link generated! Send this to the member:</p>
                 <code>{inviteLink}</code>
-                <button className="btn btn-primary" style={{marginTop: 16}} onClick={() => setShowInvite(false)}>Done</button>
+                <button className={`btn btn-primary ${styles.doneBtnMargin}`} onClick={() => setShowInvite(false)}>Done</button>
               </div>
             ) : (
               <form onSubmit={handleSendInvite}>
                 <div className="form-group">
-                  <label>Email Address</label>
-                  <input className="input" type="email" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} required />
+                  <label htmlFor="invite_email">Email Address</label>
+                  <input id="invite_email" className="input" type="email" placeholder="user@example.com" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} required />
                 </div>
-                <div className="form-group" style={{marginTop: 16}}>
-                  <label>Role</label>
-                  <select className="input" value={inviteRole} onChange={e => setInviteRole(e.target.value)}>
+                <div className={`form-group ${styles.formGroupMarginTop}`}>
+                  <label htmlFor="invite_role">Role</label>
+                  <select id="invite_role" className="input" value={inviteRole} onChange={e => setInviteRole(e.target.value)}>
                     {roles.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
                   </select>
                 </div>
                 <div className={styles.modalActions}>
                   <button type="button" className="btn btn-secondary" onClick={() => setShowInvite(false)}>Cancel</button>
-                  <button type="submit" className="btn btn-primary" disabled={inviting}>
+                  <button type="submit" className="btn btn-primary" disabled={inviting || canInviteAllowed === false}>
                     {inviting ? "Sending..." : "Send Invitation"}
                   </button>
                 </div>
@@ -396,14 +455,14 @@ export default function TeamPage() {
             </h3>
             <form onSubmit={handleCreateOrg}>
               <div className="form-group">
-                <label>Name</label>
-                <input className="input" value={newOrgName} onChange={e => setNewOrgName(e.target.value)} placeholder={createType === "root" ? "e.g. ai.org" : "e.g. Finance"} required />
+                <label htmlFor="new_org_name">Name</label>
+                <input id="new_org_name" className="input" value={newOrgName} onChange={e => setNewOrgName(e.target.value)} placeholder={createType === "root" ? "e.g. ai.org" : "e.g. Finance"} required />
               </div>
 
               {createType === "child" && rootOrgs.length > 0 && (
-                <div className="form-group" style={{marginTop: 16}}>
-                  <label>Parent Hub</label>
-                  <select className="input" value={parentOrgIdForNew || ""} onChange={e => setParentOrgIdForNew(e.target.value)}>
+                <div className={`form-group ${styles.formGroupMarginTop}`}>
+                  <label htmlFor="parent_hub">Parent Hub</label>
+                  <select id="parent_hub" className="input" value={parentOrgIdForNew || ""} onChange={e => setParentOrgIdForNew(e.target.value)}>
                     {rootOrgs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                   </select>
                 </div>
@@ -411,7 +470,7 @@ export default function TeamPage() {
 
               <div className={styles.modalActions}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
-                <button type="submit" className="btn btn-primary">Create Structure</button>
+                <button type="submit" className="btn btn-primary" disabled={createType === "child" && canCreateAllowed === false}>Create Structure</button>
               </div>
             </form>
           </div>

@@ -15,15 +15,10 @@ from app.models.database import get_db_service
 from app.workflows.graph import run_incubation_workflow
 from app.middleware.security import (
     get_current_user,
-    require_minimum_role,
     require_permission,
-    require_platform_role,
     require_feature,
     require_mfa_stepup,
     log_audit_event,
-    ROLE_HIERARCHY,
-    ROLE_DESCRIPTIONS,
-    TENANT_ROLE_HIERARCHY,
     require_org_context,
 )
 
@@ -60,14 +55,30 @@ async def create_idea(
         "title": idea.title,
         "description": idea.description,
         "industry": idea.industry,
-        "target_audience": idea.target_audience,
+        "target_market": idea.target_market,
         "status": "draft",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     
     res = await db.create_idea(idea_data)
-    await log_audit_event(user["id"], "idea_created", {"idea_id": res["id"], "org_id": org_id})
+    if not res:
+        raise HTTPException(status_code=500, detail="Failed to create idea")
+
+    # Log audit event: use keyword args so type-checkers see correct types.
+    resource_id: str | None = None
+    if res and isinstance(res, dict):
+        rid = res.get("id")
+        resource_id = str(rid) if rid is not None else None
+
+    await log_audit_event(
+        user_id=user["id"],
+        action="idea_created",
+        resource_type="idea",
+        resource_id=resource_id,
+        org_id=org_id,
+        details={},
+    )
     return res
 
 
@@ -85,7 +96,7 @@ async def list_ideas(
     
     # If no org_id, we return empty list rather than global list (Air-Gap Protection)
     if not org_id:
-        return {"ideas": [], "count": 0}
+        return {"ideas": [], "total": 0}
         
     res = await db.get_ideas(organization_id=org_id)
     return res
@@ -116,7 +127,7 @@ async def get_idea(
 async def update_idea(
     idea_id: str,
     idea_update: IdeaUpdate,
-    user: dict = Depends(require_permission("edit_ideas")),
+    user: dict = Depends(require_permission("edit_own_ideas")),
     _org: dict = Depends(require_org_context()),
 ):
     """Update an idea, strictly scoped to organization."""
@@ -183,9 +194,9 @@ async def launch_incubation(
     # Run workflow in background
     background_tasks.add_task(
         run_incubation_workflow,
-        idea_id=idea_id,
-        user_id=user["id"],
-        org_id=org_id
+        idea_id,
+        user["id"],
+        org_id,
     )
     
     return {

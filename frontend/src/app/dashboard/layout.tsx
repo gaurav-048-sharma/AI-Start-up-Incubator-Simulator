@@ -3,8 +3,17 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import Image from "next/image";
 import styles from "./layout.module.css";
-import { notificationsApi, analyticsApi, organizationsApi, type Notification as AppNotification, type Organization } from "@/lib/api";
+import {
+  authApi,
+  notificationsApi,
+  analyticsApi,
+  organizationsApi,
+  setActiveOrg,
+  type Notification as AppNotification,
+  type Organization,
+} from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 
 const NAV_ITEMS = [
@@ -36,36 +45,39 @@ export default function DashboardLayout({
   const { user, signOut } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [credits, setCredits] = useState<number | null>(null);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+  const [orgReady, setOrgReady] = useState(false);
+  const [platformRole, setPlatformRole] = useState<string>("user");
 
   useEffect(() => {
-    // Check localStorage first for active org
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("activeOrgId");
-      if (stored) setActiveOrgId(stored);
+    const stored = typeof window !== "undefined" ? localStorage.getItem("activeOrgId") : null;
+    if (stored) {
+      queueMicrotask(() => setActiveOrgId(stored));
     }
   }, []);
 
   const switchOrganization = (orgId: string) => {
-    if (typeof window !== "undefined") {
-      localStorage.setItem("activeOrgId", orgId);
-    }
+    setActiveOrg(orgId);
     setActiveOrgId(orgId);
-    window.location.reload(); // Hard reload to clear tenant context 
+    window.location.reload();
   };
 
   useEffect(() => {
     async function loadHeader() {
       try {
-        const [notifData, creditsData, orgsData] = await Promise.allSettled([
+        const [meData, notifData, creditsData, orgsData] = await Promise.allSettled([
+          authApi.me(),
           notificationsApi.getUnreadCount(),
           analyticsApi.getCredits(),
           organizationsApi.list(),
         ]);
+
+        if (meData.status === "fulfilled") {
+          setPlatformRole(meData.value.platform_role || "user");
+        }
         if (notifData.status === "fulfilled") setUnreadCount(notifData.value.unread_count);
         if (creditsData.status === "fulfilled") setCredits(creditsData.value.credits);
         if (orgsData.status === "fulfilled" && orgsData.value.organizations?.length > 0) {
@@ -73,19 +85,11 @@ export default function DashboardLayout({
           if (!activeOrgId && typeof window !== "undefined") {
             const firstOrgId = orgsData.value.organizations[0].id;
             setActiveOrgId(firstOrgId);
-            localStorage.setItem("activeOrgId", firstOrgId);
+            setActiveOrg(firstOrgId);
           }
-        }
-
-        if (user) {
-          const { createClient } = await import("@/lib/supabase/client");
-          const supabase = createClient();
-          if (supabase) {
-            const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-            if (data && data.role === 'super_admin') {
-              setIsSuperAdmin(true);
-            }
-          }
+          queueMicrotask(() => setOrgReady(true));
+        } else if (orgsData.status === "fulfilled") {
+          queueMicrotask(() => setOrgReady(true));
         }
       } catch {
         /* backend may not be connected */
@@ -93,10 +97,9 @@ export default function DashboardLayout({
     }
     loadHeader();
 
-    // Poll every 30s for notification updates
     const interval = setInterval(loadHeader, 30000);
     return () => clearInterval(interval);
-  }, [user]);
+  }, [user, activeOrgId]);
 
   const handleBellClick = async () => {
     setShowNotifDropdown((prev) => !prev);
@@ -141,22 +144,25 @@ export default function DashboardLayout({
           </div>
         </div>
 
-        {!isSuperAdmin && organizations.length > 0 && (
+        {platformRole !== "super_admin" && organizations.length > 0 && (
           <div className={styles.workspaceSelector}>
             <div className={styles.sidebarSection}>Workspace</div>
-            <select 
-              value={activeOrgId || ""} 
+            <select
+              value={activeOrgId || ""}
               onChange={(e) => switchOrganization(e.target.value)}
               className={styles.orgSelect}
+              aria-label="Workspace"
             >
-              {organizations.map(org => (
-                <option key={org.id} value={org.id}>{org.name}</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
               ))}
             </select>
           </div>
         )}
 
-        {isSuperAdmin && (
+        {platformRole === "super_admin" && (
           <div className={styles.platformBadge}>
             <div className={styles.sidebarSection}>Active Context</div>
             <div className={styles.activeContext}>
@@ -195,15 +201,16 @@ export default function DashboardLayout({
             </Link>
           ))}
 
-          {isSuperAdmin && (
+          {platformRole === "super_admin" && (
             <>
-              <div className={styles.sidebarSection} style={{ color: "#c084fc" }}>Admin Control</div>
+              <div className={`${styles.sidebarSection} ${styles.adminSection}`}>
+                Admin Control
+              </div>
               <Link
                 href="/dashboard/admin"
-                className={`${styles.navLink} ${
+                className={`${styles.navLink} ${styles.adminLink} ${
                   pathname === "/dashboard/admin" ? styles.navLinkActive : ""
                 }`}
-                style={{ borderColor: pathname === "/dashboard/admin" ? "#c084fc" : "transparent" }}
               >
                 <span className={styles.navIcon}>👑</span>
                 Admin Panel
@@ -227,26 +234,43 @@ export default function DashboardLayout({
         </nav>
 
         <div className={styles.sidebarFooter}>
-          <div className={styles.userCard} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-              <div className={styles.userAvatar}>{user?.user_metadata?.avatar_url ? <img src={user.user_metadata.avatar_url} alt="Avatar" style={{width: 32, height: 32, borderRadius: "50%"}} /> : "👤"}</div>
+          <div className={`${styles.userCard} ${styles.userCardRow}`}>
+            <div className={styles.userRow}>
+              <div className={styles.userAvatar}>
+                {user?.user_metadata?.avatar_url ? (
+                  <Image
+                    src={user.user_metadata.avatar_url}
+                    alt="Avatar"
+                    width={40}
+                    height={40}
+                    className={styles.userAvatarImg}
+                  />
+                ) : (
+                  "👤"
+                )}
+              </div>
               <div>
-                <div className={styles.userName} style={{ maxWidth: "100px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <div
+                  className={`${styles.userName} ${styles.userNameClamp}`}
+                >
                   {user?.user_metadata?.full_name || user?.email || "Founder"}
                 </div>
                 <div className={styles.userRole}>
-                  {isSuperAdmin ? (
-                    <span style={{ color: "#c084fc", fontWeight: "600" }}>Platform Admin · Unlimited</span>
+                  {platformRole === "super_admin" ? (
+                    <span className={styles.superAdminLabel}>
+                      Platform Admin · Unlimited
+                    </span>
                   ) : (
-                    <>{user?.user_metadata?.tier || "Free"} Plan · {credits !== null ? credits : "—"} credits</>
+                    <>
+                      {user?.user_metadata?.tier || "Free"} Plan · {credits !== null ? credits : "—"} credits
+                    </>
                   )}
                 </div>
               </div>
             </div>
-            <button 
-              onClick={signOut} 
-              className="btn btn-ghost btn-sm" 
-              style={{ padding: "0.25rem 0.5rem", fontSize: "1.2rem", color: "#888" }}
+            <button
+              onClick={signOut}
+              className={`btn btn-ghost btn-sm ${styles.signOutButton}`}
               title="Sign Out"
             >
               🚪
@@ -257,63 +281,69 @@ export default function DashboardLayout({
 
       {/* Main Content */}
       <main className={styles.mainContent}>
-        <header className={styles.header}>
-          <div className={styles.headerTitle}>
-            {getPageTitle(pathname)}
+        {!orgReady && platformRole !== "super_admin" ? (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <div className="animate-spin text-3xl">🚀</div>
           </div>
-          <div className={styles.headerActions}>
-            {/* Notification Bell */}
-            <div className={styles.notifWrapper}>
-              <button
-                className={styles.notifBell}
-                onClick={handleBellClick}
-                id="notification-bell"
-                aria-label="Notifications"
-              >
-                🔔
-                {unreadCount > 0 && (
-                  <span className={styles.notifBadge}>{unreadCount > 9 ? "9+" : unreadCount}</span>
-                )}
-              </button>
-
-              {showNotifDropdown && (
-                <div className={`${styles.notifDropdown} glass-card`}>
-                  <div className={styles.notifDropdownHeader}>
-                    <span>Notifications</span>
+        ) : (
+          <>
+            <header className={styles.header}>
+              <div className={styles.headerTitle}>{getPageTitle(pathname)}</div>
+              <div className={styles.headerActions}>
+                {/* Notification Bell */}
+                <div className={styles.notifWrapper}>
+                  <button
+                    className={styles.notifBell}
+                    onClick={handleBellClick}
+                    id="notification-bell"
+                    aria-label="Notifications"
+                  >
+                    🔔
                     {unreadCount > 0 && (
-                      <button className="btn btn-ghost btn-sm" onClick={handleMarkAllRead}>
-                        Mark all read
-                      </button>
+                      <span className={styles.notifBadge}>{unreadCount > 9 ? "9+" : unreadCount}</span>
                     )}
-                  </div>
-                  {notifications.length === 0 ? (
-                    <div className={styles.notifEmpty}>No notifications yet</div>
-                  ) : (
-                    notifications.map((n) => (
-                      <button
-                        key={n.id}
-                        className={`${styles.notifItem} ${!n.is_read ? styles.notifUnread : ""}`}
-                        onClick={() => handleNotifClick(n)}
-                      >
-                        <div className={styles.notifTitle}>{n.title}</div>
-                        {n.body && <div className={styles.notifBody}>{n.body}</div>}
-                        <div className={styles.notifTime}>
-                          {new Date(n.created_at).toLocaleDateString()}
-                        </div>
-                      </button>
-                    ))
+                  </button>
+
+                  {showNotifDropdown && (
+                    <div className={`${styles.notifDropdown} glass-card`}>
+                      <div className={styles.notifDropdownHeader}>
+                        <span>Notifications</span>
+                        {unreadCount > 0 && (
+                          <button className="btn btn-ghost btn-sm" onClick={handleMarkAllRead}>
+                            Mark all read
+                          </button>
+                        )}
+                      </div>
+                      {notifications.length === 0 ? (
+                        <div className={styles.notifEmpty}>No notifications yet</div>
+                      ) : (
+                        notifications.map((n) => (
+                          <button
+                            key={n.id}
+                            className={`${styles.notifItem} ${!n.is_read ? styles.notifUnread : ""}`}
+                            onClick={() => handleNotifClick(n)}
+                          >
+                            <div className={styles.notifTitle}>{n.title}</div>
+                            {n.body && <div className={styles.notifBody}>{n.body}</div>}
+                            <div className={styles.notifTime}>
+                              {new Date(n.created_at).toLocaleDateString()}
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
 
-            <Link href="/dashboard/ideas/new" className="btn btn-primary btn-sm" id="header-new-idea">
-              ✨ New Idea
-            </Link>
-          </div>
-        </header>
+                <Link href="/dashboard/ideas/new" className="btn btn-primary btn-sm" id="header-new-idea">
+                  ✨ New Idea
+                </Link>
+              </div>
+            </header>
 
-        <div className={styles.pageContent}>{children}</div>
+            <div className={styles.pageContent}>{children}</div>
+          </>
+        )}
       </main>
     </div>
   );

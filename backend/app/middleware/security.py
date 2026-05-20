@@ -12,11 +12,9 @@ Architecture:
 
 import uuid
 import time
-import asyncio
 import structlog
 from collections import defaultdict
 from fastapi import Request, HTTPException, Depends
-from pydantic import BaseModel
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -24,8 +22,7 @@ from typing import Optional
 from datetime import datetime, timezone
 import contextvars
 
-from app.config import get_settings
-from app.models.database import get_supabase_client
+# note: `asyncio`, `get_settings`, and `get_supabase_client` are imported locally where needed
 
 # ── Caching Layer ────────────────────────────────────────────────
 # Caching role data for 60 seconds to avoid multi-second DB latency
@@ -61,6 +58,8 @@ PLATFORM_ROLE_DESCRIPTIONS = {
 # TENANT ROLES — per-organization access (NEVER elevate to platform)
 # ═══════════════════════════════════════════════════════════════════
 
+WORKSPACE_OWNER_ROLE = "workspace_owner"
+
 TENANT_ROLE_HIERARCHY = {
     "viewer":                10,
     "team_member":           20,
@@ -77,10 +76,17 @@ TENANT_ROLE_HIERARCHY = {
     "innovation_lead":       50,
     "incubator_manager":     60,
     "admin":                 70,
+    WORKSPACE_OWNER_ROLE:     80,
+}
+
+ASSIGNABLE_TENANT_ROLES = {
+    role for role in TENANT_ROLE_HIERARCHY
+    if role != WORKSPACE_OWNER_ROLE
 }
 
 # Legacy alias for backwards-compatible imports
-ROLE_HIERARCHY = {**TENANT_ROLE_HIERARCHY, "super_admin": 80}
+# Include tenant hierarchy and map platform super_admin to its platform value
+ROLE_HIERARCHY = {**TENANT_ROLE_HIERARCHY, "super_admin": PLATFORM_ROLES.get("super_admin", 100)}
 
 ROLE_DESCRIPTIONS = {
     "viewer":                "Read-only access to shared ideas and reports",
@@ -96,8 +102,9 @@ ROLE_DESCRIPTIONS = {
     "founder":               "Full access to own ideas, simulations, reports, and subscriptions",
     "investor_advisor":      "Review startup simulations, provide feedback, access pitch data",
     "innovation_lead":       "Manage internal projects, organizational teams, white-label settings",
-    "incubator_manager":     "Oversee cohorts, all startups, team performance, analytics dashboards",
-    "admin":                 "Organization admin: manage users, billing, SSO within the workspace",
+    "incubator_manager":     "Org admin: manage users, SSO, and all workflows in the workspace",
+    "admin":                 "Org admin: manage users, SSO, billing, and workspace settings",
+    "workspace_owner":       "Workspace owner: billing authority and ultimate org accountability",
     "super_admin":           "Platform super admin (platform_role, not a tenant role)",
 }
 
@@ -181,18 +188,29 @@ ROLE_PERMISSIONS = {
     ],
 }
 
+ROLE_PERMISSIONS[WORKSPACE_OWNER_ROLE] = list(ROLE_PERMISSIONS["admin"])
+
 
 def has_permission(user_role: str, required_permission: str) -> bool:
     """Check if a TENANT role has a specific permission."""
+    # Platform super_admin should have all permissions implicitly
+    if user_role == "super_admin":
+        return True
     perms = ROLE_PERMISSIONS.get(user_role, [])
     return required_permission in perms
 
 
 def has_role_level(user_role: str, minimum_role: str) -> bool:
     """Check if a TENANT role level meets or exceeds the minimum."""
-    user_level = TENANT_ROLE_HIERARCHY.get(user_role, 0)
-    min_level = TENANT_ROLE_HIERARCHY.get(minimum_role, 999)
+    # Use ROLE_HIERARCHY which includes tenant roles and maps super_admin to platform value
+    user_level = ROLE_HIERARCHY.get(user_role, 0)
+    min_level = ROLE_HIERARCHY.get(minimum_role, 999)
     return user_level >= min_level
+
+
+def resolve_effective_org_role(user: dict) -> str:
+    """Resolve the effective tenant role for permission checks."""
+    return user.get("org_role") or user.get("role", "viewer")
 
 
 def has_platform_level(platform_role: str, minimum: str) -> bool:
@@ -342,12 +360,13 @@ async def get_current_user(
 
     # Demo mode
     if not settings.has_supabase:
+        # Demo user for local development and tests — provide a demo org context
         return {
             "id": "demo-user",
             "email": "demo@incubator.ai",
             "platform_role": "user",
             "tier": "free",
-            "org_id": None,
+            "org_id": "demo-org",
             "org_role": "founder",
             "full_name": "Demo Founder",
             # Legacy compat
@@ -380,15 +399,20 @@ async def get_current_user(
 
         user = user_response.user
         user_id = str(user.id)
-        user_tier = user.user_metadata.get("tier", "free")
-        
+
+        # user_metadata/app_metadata can be arbitrary JSON values; coerce to dict for safe .get() usage
+        raw_user_meta = getattr(user, "user_metadata", None) or {}
+        user_meta = raw_user_meta if isinstance(raw_user_meta, dict) else {}
+        user_tier = user_meta.get("tier", "free")
+
         # MFA Context: Authenticator Assurance Level (aal1 = password, aal2 = MFA)
-        auth_app_metadata = user.app_metadata or {}
+        raw_app_meta = getattr(user, "app_metadata", None) or {}
+        auth_app_metadata = raw_app_meta if isinstance(raw_app_meta, dict) else {}
         aal = auth_app_metadata.get("aal", "aal1")
 
         # Fetch platform_role from profiles (with caching)
-        platform_role = user.user_metadata.get("platform_role", "user")
-        profile_role = user.user_metadata.get("role", "founder")
+        platform_role = user_meta.get("platform_role", "user")
+        profile_role = user_meta.get("role", "founder")
         
         now = time.time()
         cached = _PROFILE_CACHE.get(user_id)
@@ -408,7 +432,7 @@ async def get_current_user(
                     .single()
                     .execute()
                 )
-                if profile.data:
+                if profile.data and isinstance(profile.data, dict):
                     platform_role = profile.data.get("platform_role") or platform_role
                     profile_role = profile.data.get("role") or profile_role
                     user_tier = profile.data.get("tier") or user_tier
@@ -429,6 +453,7 @@ async def get_current_user(
         if org_id == "": # Handle empty string from frontend
             org_id = None
         org_role = None
+        is_owner = False
 
         # Super Admins only resolve org context if they explicitly provide it.
         # They are NOT restricted by memberships.
@@ -443,9 +468,10 @@ async def get_current_user(
                 "tier": user_tier,
                 "org_id": org_id,
                 "org_role": org_role,
+                "org_owner": False,
                 "mfa_active": aal == "aal2",
                 "mfa_aal": aal,
-                "full_name": user.user_metadata.get("full_name", ""),
+                "full_name": user_meta.get("full_name", ""),
                 "role": profile_role,
             }
 
@@ -460,11 +486,33 @@ async def get_current_user(
                     .single()
                     .execute()
                 )
-                if membership.data:
-                    org_role = membership.data["role"]
+                if membership.data and isinstance(membership.data, dict):
+                    org_role = membership.data.get("role")
+                    owner_check = await asyncio.to_thread(
+                        lambda: supabase.table("organizations")
+                        .select("owner_id")
+                        .eq("id", org_id)
+                        .single()
+                        .execute()
+                    )
+                    if owner_check.data and isinstance(owner_check.data, dict) and owner_check.data.get("owner_id") == user_id:
+                        is_owner = True
+                        org_role = WORKSPACE_OWNER_ROLE
                 else:
-                    # Regular user tried to access an org they don't belong to
-                    org_id = None
+                    # Check ownership (workspace owner), then fall back to no access
+                    owner_check = await asyncio.to_thread(
+                        lambda: supabase.table("organizations")
+                        .select("owner_id")
+                        .eq("id", org_id)
+                        .single()
+                        .execute()
+                    )
+                    if owner_check.data and isinstance(owner_check.data, dict) and owner_check.data.get("owner_id") == user_id:
+                        is_owner = True
+                        org_role = WORKSPACE_OWNER_ROLE
+                    else:
+                        # Regular user tried to access an org they don't belong to
+                        org_id = None
             except Exception:
                 org_id = None
 
@@ -475,6 +523,7 @@ async def get_current_user(
             "tier": user_tier,
             "org_id": org_id,
             "org_role": org_role,
+            "org_owner": is_owner,
             "mfa_active": aal == "aal2",
             "mfa_aal": aal,
             "full_name": user.user_metadata.get("full_name", ""),
@@ -514,7 +563,7 @@ def require_platform_role(minimum_role: str):
 def require_role(*allowed_roles: str):
     """Dependency that checks if the current user has one of the allowed tenant roles."""
     async def _checker(user: dict = Depends(get_current_user)):
-        effective = user.get("org_role") or user.get("role", "viewer")
+        effective = resolve_effective_org_role(user)
         if effective not in allowed_roles and user.get("platform_role") != "super_admin":
             raise HTTPException(status_code=403, detail=f"Requires role: {', '.join(allowed_roles)}")
         return user
@@ -543,7 +592,7 @@ def require_minimum_role(minimum_role: str):
                 )
 
         # Determine effective tenant role
-        effective_role = user.get("org_role") or user.get("role", "viewer")
+        effective_role = resolve_effective_org_role(user)
 
         if not has_role_level(effective_role, minimum_role):
             raise HTTPException(
@@ -571,7 +620,7 @@ def require_permission(permission: str):
                     detail="Access denied: you are not a member of this organization."
                 )
 
-        effective_role = user.get("org_role") or user.get("role", "viewer")
+        effective_role = resolve_effective_org_role(user)
 
         if not has_permission(effective_role, permission):
             raise HTTPException(
@@ -679,6 +728,12 @@ FEATURE_TIERS = {
 def require_feature(feature: str):
     """Dependency that checks if the user's tier includes the requested feature."""
     async def _checker(user: dict = Depends(get_current_user)):
+        from app.config import get_settings
+        settings = get_settings()
+        # In demo/development mode, enable features for easier testing
+        if not settings.has_supabase or settings.debug or settings.environment == "development":
+            return user
+
         if user.get("platform_role") == "super_admin":
             return user
         allowed_tiers = FEATURE_TIERS.get(feature, [])

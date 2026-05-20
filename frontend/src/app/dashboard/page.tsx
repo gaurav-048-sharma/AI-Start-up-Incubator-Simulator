@@ -3,20 +3,73 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import styles from "./dashboard.module.css";
-import { ideasApi, analyticsApi, type Idea } from "@/lib/api";
+import { authApi, ideasApi, analyticsApi, getActiveOrgId, organizationsApi, setActiveOrg, type Idea } from "@/lib/api";
 
 export default function DashboardPage() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
   const [backendStatus, setBackendStatus] = useState<Record<string, boolean>>({});
   const [credits, setCredits] = useState<number | null>(null);
+  const [orgReady, setOrgReady] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    let mounted = true;
+
+    const checkOrg = async () => {
+      const existing = getActiveOrgId();
+      if (existing) {
+        setOrgReady(true);
+        return;
+      }
+
+      try {
+        const me = await authApi.me();
+        if (!mounted) return;
+
+        if (me.current_org_id) {
+          setActiveOrg(me.current_org_id);
+          setOrgReady(true);
+          return;
+        }
+
+        const orgs = await organizationsApi.list();
+        if (!mounted) return;
+        const firstOrg = orgs.organizations?.[0]?.id;
+        if (firstOrg) {
+          setActiveOrg(firstOrg);
+        }
+      } catch (err) {
+        if (mounted) {
+          setLoadError(err instanceof Error ? err.message : "Unable to initialize organization context.");
+        }
+      } finally {
+        if (mounted) setOrgReady(true);
+      }
+    };
+
+    void checkOrg();
+
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "activeOrgId") {
+        if (event.newValue) setOrgReady(true);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      mounted = false;
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!orgReady) return;
     async function load() {
       try {
+        setLoadError(null);
         // Check backend health
         const health = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/health`
+          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001"}/health`
         ).then((r) => r.json());
         setBackendStatus(health.services || {});
 
@@ -31,13 +84,14 @@ export default function DashboardPage() {
         } catch { /* skip */ }
       } catch {
         // Backend might not be connected to Supabase yet — use empty state
+        setLoadError("Backend data could not be loaded for the current organization context.");
         setIdeas([]);
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, []);
+  }, [orgReady]);
 
   const totalIdeas = ideas.length;
   const inProgress = ideas.filter((i) =>
@@ -47,6 +101,12 @@ export default function DashboardPage() {
 
   return (
     <div className="animate-fade-in">
+      {loadError && (
+        <div className="glass-card" style={{ marginBottom: 16, padding: 16, border: "1px solid var(--warning)" }}>
+          <strong>Data loading issue:</strong> {loadError}
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className={styles.statsGrid}>
         {[

@@ -23,6 +23,10 @@ def get_supabase_client(admin: bool = False) -> Client:
     global _admin_supabase_client
     settings = get_settings()
     
+    # If Supabase not configured, return None to enable demo/mock mode
+    if not settings.has_supabase:
+        return None
+
     if admin:
         if _admin_supabase_client is None:
             # We use the standard create_client but we can pass a custom session
@@ -64,6 +68,10 @@ class DatabaseService:
 
     async def get_profile(self, user_id: str) -> Optional[dict]:
         """Get a user profile by ID."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            # Demo environment: return a minimal profile
+            return {"id": user_id, "platform_role": "user", "role": "founder", "tier": "free"}
         try:
             result = await asyncio.to_thread(
                 lambda: self._client.table("profiles").select("*").eq("id", user_id).single().execute()
@@ -76,6 +84,12 @@ class DatabaseService:
 
     async def update_profile(self, user_id: str, data: dict) -> Optional[dict]:
         """Update a user profile."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            # Demo environment: merge and return
+            profile = {"id": user_id, "platform_role": "user", "role": "founder", "tier": "free"}
+            profile.update(data)
+            return profile
         try:
             result = await asyncio.to_thread(
                 lambda: self._client.table("profiles").update(data).eq("id", user_id).execute()
@@ -90,6 +104,11 @@ class DatabaseService:
 
     async def create_idea(self, idea_data: dict) -> Optional[dict]:
         """Create a new startup idea."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            # Demo environment: return the provided idea_data as created
+            logger.info("Idea created (demo)", idea_id=idea_data.get("id"))
+            return idea_data
         try:
             result = await asyncio.to_thread(
                 lambda: self._client.table("ideas").insert(idea_data).execute()
@@ -103,6 +122,9 @@ class DatabaseService:
 
     async def get_idea(self, idea_id: str) -> Optional[dict]:
         """Get a startup idea by ID."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            return None
         try:
             result = await asyncio.to_thread(
                 lambda: self._client.table("ideas").select("*").eq("id", idea_id).single().execute()
@@ -115,6 +137,9 @@ class DatabaseService:
 
     async def get_user_ideas(self, user_id: str, organization_id: Optional[str] = None) -> list[dict]:
         """Get all ideas for a user or organization."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            return []
         try:
             def _execute_query():
                 query = self._client.table("ideas").select("*")
@@ -130,6 +155,28 @@ class DatabaseService:
             if self._client is not None:
                 logger.error("Failed to get ideas", user_id=user_id, org_id=organization_id, error=str(e))
             return []
+
+    async def get_ideas(self, organization_id: Optional[str] = None, user_id: Optional[str] = None) -> dict:
+        """Get ideas scoped by organization or user."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            return {"ideas": [], "total": 0}
+        try:
+            def _execute_query():
+                query = self._client.table("ideas").select("*")
+                if organization_id:
+                    query = query.eq("organization_id", organization_id)
+                elif user_id:
+                    query = query.eq("user_id", user_id)
+                return query.order("created_at", desc=True).execute()
+
+            result = await asyncio.to_thread(_execute_query)
+            ideas = result.data or []
+            return {"ideas": ideas, "total": len(ideas)}
+        except Exception as e:
+            if self._client is not None:
+                logger.error("Failed to list ideas", user_id=user_id, org_id=organization_id, error=str(e))
+            return {"ideas": [], "total": 0}
 
     async def update_idea(self, idea_id: str, data: dict) -> Optional[dict]:
         """Update a startup idea."""

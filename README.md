@@ -72,6 +72,13 @@ npm run dev
 - **RBAC & Feature Flags** — Tier-based access control per feature
 - **Security Middleware** — Rate limiting, JWT auth, request tracing
 
+### Recommended Admin Hierarchy
+- **Platform Super Admin** — Manages database migrations, global feature flags, suspends malicious organizations
+- **Platform Support** — Read-only global visibility for troubleshooting
+- **Workspace Owner** — Pays the bill and holds financial liability for the workspace
+- **Incubator Manager / Org Admin** — Manages users, sets up SSO, accesses all workflows inside the isolated org
+- **Members / Founders** — Read/write access scoped to their project bounds
+
 ## Project Structure
 
 ```

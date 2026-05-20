@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
 interface ApiOptions {
   method?: string;
@@ -6,6 +6,68 @@ interface ApiOptions {
   headers?: Record<string, string>;
   /** Skip org context injection (for platform-level routes) */
   skipOrgContext?: boolean;
+}
+
+async function getSupabaseAccessToken(): Promise<string | null> {
+  if (typeof window === "undefined" || !process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    return null;
+  }
+
+  try {
+    const { createClient } = await import("./supabase/client");
+    const supabase = createClient();
+    if (!supabase) return null;
+
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const token = await getSupabaseAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function resolveOrgContext(): Promise<string | null> {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const existing = localStorage.getItem("activeOrgId");
+  if (existing) {
+    return existing;
+  }
+
+  const authHeaders = await getAuthHeaders();
+  if (!authHeaders.Authorization) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/me/`, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+      },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const me = await response.json().catch(() => null) as MeResponse | null;
+    const orgId = me?.current_org_id || null;
+    if (orgId) {
+      localStorage.setItem("activeOrgId", orgId);
+      window.dispatchEvent(new StorageEvent("storage", { key: "activeOrgId", newValue: orgId }));
+    }
+    return orgId;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -18,10 +80,14 @@ export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}):
   const { method = "GET", body, headers = {}, skipOrgContext = false } = options;
 
   // Resolve active org from localStorage (Slack/GitHub-style multi-org switching)
-  const activeOrgId =
+  let activeOrgId =
     !skipOrgContext && typeof window !== "undefined"
       ? localStorage.getItem("activeOrgId")
       : null;
+
+  if (!skipOrgContext && !activeOrgId && endpoint !== "/api/me/" && endpoint !== "/api/me") {
+    activeOrgId = await resolveOrgContext();
+  }
 
   const config: RequestInit = {
     method,
@@ -33,19 +99,11 @@ export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}):
   };
 
   // Inject Supabase JWT
-  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-    try {
-      const { createClient } = await import("./supabase/client");
-      const supabase = createClient();
-      if (supabase) {
-        const { data } = await supabase.auth.getSession();
-        if (data?.session?.access_token) {
-          (config.headers as Record<string, string>)["Authorization"] = `Bearer ${data.session.access_token}`;
-        }
-      }
-    } catch {
-      // Ignore
-    }
+  const authHeaders = await getAuthHeaders();
+  Object.assign(config.headers as Record<string, string>, authHeaders);
+
+  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL && activeOrgId) {
+    (config.headers as Record<string, string>)["X-Org-Id"] = activeOrgId;
   }
 
   if (body) {
@@ -60,6 +118,24 @@ export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}):
   }
 
   return response.json();
+}
+
+export interface MeResponse {
+  user_id: string;
+  email: string | null;
+  full_name: string | null;
+  platform_role: string;
+  tier: string;
+  mfa_active: boolean;
+  mfa_aal: string;
+  current_org_id: string | null;
+  current_org_role: string | null;
+  current_org_owner: boolean;
+  memberships: Array<{
+    organization_id: string;
+    role: string | null;
+    is_owner: boolean;
+  }>;
 }
 
 // ── Org Context Helpers ─────────────────────────────────────────
@@ -158,6 +234,10 @@ export const notificationsApi = {
     apiRequest<{ success: boolean }>(`/api/notifications/${id}`, { method: "DELETE" }),
 };
 
+export const authApi = {
+  me: () => apiRequest<MeResponse>("/api/me/"),
+};
+
 // ── Settings API ─────────────────────────────────────────────────
 export const settingsApi = {
   get: () => apiRequest<UserSettings>("/api/settings"),
@@ -180,10 +260,10 @@ export const organizationsApi = {
     apiRequest<{ organizations: Organization[] }>("/api/organizations"),
   get: (orgId: string) =>
     apiRequest<Organization>(`/api/organizations/${orgId}`),
-  create: (name: string, slug: string) =>
+  create: (name: string, slug: string, parentId?: string) =>
     apiRequest<Organization>("/api/organizations", {
       method: "POST",
-      body: { name, slug },
+      body: { name, slug, parent_id: parentId || null },
     }),
   getRoles: () =>
     apiRequest<{ roles: RoleInfo[] }>("/api/organizations/roles"),
@@ -503,6 +583,7 @@ export interface RoleInfo {
   label: string;
   level: number;
   description: string;
+  assignable?: boolean;
 }
 
 export interface AuditEntry {

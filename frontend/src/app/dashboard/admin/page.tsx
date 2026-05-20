@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import styles from "./admin.module.css";
-import { adminApi } from "@/lib/api";
+import { adminApi, authApi } from "@/lib/api";
 import type { EnterpriseRequest as EnterpriseReqType, Organization } from "@/lib/api";
 
 type EnterpriseRequest = EnterpriseReqType;
@@ -17,41 +17,66 @@ export default function EnterpriseAdminDashboard() {
   const [isUnauthorized, setIsUnauthorized] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  const fetchRequests = async () => {
+  const getErrorMessage = (err: unknown, fallback: string) =>
+    err instanceof Error ? err.message : fallback;
+
+  const fetchRequests = useCallback(async () => {
     try {
       const data = await adminApi.listEnterpriseRequests();
       setRequests(data.requests);
-    } catch (err: any) {
-      if (err.message?.includes("platform_role") || err.message?.includes("Platform role") || err.message?.includes("401")) {
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, "Failed to load enterprise requests.");
+      if (message.includes("platform_role") || message.includes("Platform role") || message.includes("401")) {
         setIsUnauthorized(true);
       } else {
-        setError(err.message || "Failed to load enterprise requests.");
+        setError(message);
       }
     }
-  };
+  }, []);
 
-  const fetchOrganizations = async () => {
+  const fetchOrganizations = useCallback(async () => {
     try {
       const data = await adminApi.listAllOrganizations();
       setOrganizations(data.organizations as AdminOrg[]);
-    } catch (err: any) {
-      if (err.message?.includes("platform_role") || err.message?.includes("Platform role") || err.message?.includes("401")) {
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, "Failed to load organizations.");
+      if (message.includes("platform_role") || message.includes("Platform role") || message.includes("401")) {
         setIsUnauthorized(true);
       } else {
-        setError(err.message || "Failed to load organizations.");
+        setError(message);
       }
     }
-  };
+  }, []);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     await Promise.all([fetchRequests(), fetchOrganizations()]);
     setLoading(false);
-  };
+  }, [fetchRequests, fetchOrganizations]);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    let mounted = true;
+
+    authApi.me()
+      .then((me) => {
+        if (!mounted) return;
+        if (me.platform_role !== "super_admin") {
+          setIsUnauthorized(true);
+          setLoading(false);
+          return;
+        }
+        void loadData();
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setIsUnauthorized(true);
+        setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [loadData]);
 
   const handleApprove = async (id: string) => {
     if (!confirm("Are you sure you want to approve this request and generate a payment link?")) return;
@@ -67,8 +92,8 @@ export default function EnterpriseAdminDashboard() {
         }
       }
       loadData(); // Refresh list
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err: unknown) {
+      alert("Error: " + getErrorMessage(err, "Failed to approve request."));
     } finally {
       setProcessingId(null);
     }
@@ -81,8 +106,8 @@ export default function EnterpriseAdminDashboard() {
     try {
       await adminApi.updateOrgStatus(id, newStatus);
       fetchOrganizations();
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err: unknown) {
+      alert("Error: " + getErrorMessage(err, "Failed to update status."));
     }
   };
 
@@ -92,21 +117,21 @@ export default function EnterpriseAdminDashboard() {
     try {
       await adminApi.deleteOrganization(id);
       fetchOrganizations();
-    } catch (err: any) {
-      alert("Error: " + err.message);
+    } catch (err: unknown) {
+      alert("Error: " + getErrorMessage(err, "Failed to delete organization."));
     }
   };
 
   if (loading) {
-    return <div className={styles.adminPage}><div className="loader" style={{margin:"0 auto"}} /></div>;
+    return <div className={styles.adminPage}><div className={`${styles.loadingWrap} loader`} /></div>;
   }
 
   if (isUnauthorized) {
     return (
-      <div className={styles.adminPage} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "60vh", textAlign: "center" }}>
-        <h1 style={{ fontSize: "4rem", marginBottom: "1rem", color: "#ef4444" }}>403</h1>
-        <h2 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>Access Denied</h2>
-        <p style={{ color: "var(--color-gray-400)", maxWidth: "400px" }}>
+      <div className={`${styles.adminPage} ${styles.accessDeniedWrap}`}>
+        <h1 className={styles.accessDeniedCode}>403</h1>
+        <h2 className={styles.accessDeniedTitle}>Access Denied</h2>
+        <p className={styles.accessDeniedText}>
           You do not have the required <strong>Platform Super Admin</strong> role to view this page. Contact the platform administrator if you believe this is a mistake.
         </p>
       </div>
@@ -138,7 +163,7 @@ export default function EnterpriseAdminDashboard() {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: "1rem", marginBottom: "2rem" }}>
+      <div className={styles.tabRow}>
         <button 
           className={`btn ${activeTab === "requests" ? "btn-primary" : "btn-outline"}`}
           onClick={() => setActiveTab("requests")}
@@ -154,7 +179,7 @@ export default function EnterpriseAdminDashboard() {
       </div>
 
       {error && (
-        <div style={{ color: "#ef4444", marginBottom: "1rem", padding: "1rem", background: "rgba(239, 68, 68, 0.1)", borderRadius: "8px" }}>
+        <div className={styles.errorBox}>
           ⚠️ {error}
         </div>
       )}
@@ -187,10 +212,10 @@ export default function EnterpriseAdminDashboard() {
                     </td>
                     <td>
                       <div>{req.contact_name}</div>
-                      <div style={{ fontSize: "0.8rem", color: "var(--color-gray-400)" }}>{req.contact_email}</div>
+                      <div className={styles.smallMuted}>{req.contact_email}</div>
                     </td>
                     <td>
-                      <div style={{ fontSize: "0.85rem" }}>
+                      <div className={styles.smallText}>
                         Seats: {req.required_seats || "N/A"}<br/>
                         Size: {req.team_size || "N/A"}<br/>
                         Industry: {req.industry || "N/A"}
@@ -216,7 +241,7 @@ export default function EnterpriseAdminDashboard() {
                           </button>
                         </div>
                       ) : (
-                        <span style={{ color: "var(--color-gray-400)", fontSize: "0.85rem" }}>
+                        <span className={styles.smallMuted}>
                           Processed
                         </span>
                       )}
@@ -258,7 +283,7 @@ export default function EnterpriseAdminDashboard() {
                     </td>
                     <td>{org.slug}</td>
                     <td>
-                      <span className={styles.statusBadge} style={{ background: "rgba(168,85,247,0.2)", color: "#c084fc" }}>
+                      <span className={`${styles.statusBadge} ${styles.planBadgeAlt}`}>
                         {org.plan}
                       </span>
                     </td>
@@ -279,11 +304,7 @@ export default function EnterpriseAdminDashboard() {
                         >
                           {org.status === 'active' ? 'Suspend' : 'Reactivate'}
                         </button>
-                        <button 
-                          className="btn btn-outline btn-sm"
-                          style={{ borderColor: "#ef4444", color: "#ef4444" }}
-                          onClick={() => handleDeleteOrg(org.id)}
-                        >
+                        <button className={`btn btn-outline btn-sm ${styles.deleteButton}`} onClick={() => handleDeleteOrg(org.id)}>
                           Delete
                         </button>
                       </div>
