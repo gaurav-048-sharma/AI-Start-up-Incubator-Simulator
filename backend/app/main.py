@@ -148,6 +148,20 @@ def create_app() -> FastAPI:
     except ImportError:
         logger.warning("Billing routes not available")
 
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request, exc):
+        import logging
+        import json
+        with open("validation_error_log.txt", "a") as f:
+            f.write(f"\\n--- 422 ERROR ---\\n")
+            f.write(f"URL: {request.url}\\n")
+            f.write(f"Errors: {exc.errors()}\\n")
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+
+
     # ── Prometheus Metrics Endpoint ──────────────────────────────
     @app.get("/metrics", tags=["System"], include_in_schema=False)
     async def metrics():

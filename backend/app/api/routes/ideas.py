@@ -20,6 +20,7 @@ from app.middleware.security import (
     require_mfa_stepup,
     log_audit_event,
     require_org_context,
+    require_write_access,
 )
 
 logger = structlog.get_logger()
@@ -31,6 +32,7 @@ async def create_idea(
     idea: IdeaCreate,
     user: dict = Depends(require_mfa_stepup()),
     _org: dict = Depends(require_org_context()),
+    _write_access: dict = Depends(require_write_access()),
     _feature: dict = Depends(require_feature("create_idea")),
 ):
     """
@@ -129,6 +131,7 @@ async def update_idea(
     idea_update: IdeaUpdate,
     user: dict = Depends(require_permission("edit_own_ideas")),
     _org: dict = Depends(require_org_context()),
+    _write_access: dict = Depends(require_write_access()),
 ):
     """Update an idea, strictly scoped to organization."""
     db = get_db_service()
@@ -153,6 +156,7 @@ async def delete_idea(
     idea_id: str,
     user: dict = Depends(require_permission("delete_ideas")),
     _org: dict = Depends(require_org_context()),
+    _write_access: dict = Depends(require_write_access()),
 ):
     """Delete an idea, strictly scoped to organization."""
     db = get_db_service()
@@ -175,6 +179,7 @@ async def launch_incubation(
     background_tasks: BackgroundTasks,
     user: dict = Depends(require_mfa_stepup()),
     _org: dict = Depends(require_org_context()),
+    _write_access: dict = Depends(require_write_access()),
     _feature: dict = Depends(require_feature("launch_workflow")),
 ):
     """Launch the AI incubation workflow for an idea."""

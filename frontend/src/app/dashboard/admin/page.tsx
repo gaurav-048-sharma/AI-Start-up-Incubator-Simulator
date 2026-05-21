@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 import styles from "./admin.module.css";
 import { adminApi, authApi } from "@/lib/api";
-import type { EnterpriseRequest as EnterpriseReqType, Organization } from "@/lib/api";
+import type { EnterpriseRequest as EnterpriseReqType, Organization, PlatformUser } from "@/lib/api";
 
 type EnterpriseRequest = EnterpriseReqType;
 type AdminOrg = Organization & { status?: string; subscription_status?: string };
 
 export default function EnterpriseAdminDashboard() {
-  const [activeTab, setActiveTab] = useState<"requests" | "organizations">("requests");
+  const [activeTab, setActiveTab] = useState<"requests" | "organizations" | "users">("requests");
   const [requests, setRequests] = useState<EnterpriseRequest[]>([]);
   const [organizations, setOrganizations] = useState<AdminOrg[]>([]);
+  const [users, setUsers] = useState<PlatformUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [isUnauthorized, setIsUnauthorized] = useState(false);
@@ -48,11 +49,25 @@ export default function EnterpriseAdminDashboard() {
     }
   }, []);
 
+  const fetchUsers = useCallback(async () => {
+    try {
+      const data = await adminApi.listUsers();
+      setUsers(data.users);
+    } catch (err: unknown) {
+      const message = getErrorMessage(err, "Failed to load users.");
+      if (message.includes("platform_role") || message.includes("Platform role") || message.includes("401")) {
+        setIsUnauthorized(true);
+      } else {
+        setError(message);
+      }
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     setLoading(true);
-    await Promise.all([fetchRequests(), fetchOrganizations()]);
+    await Promise.all([fetchRequests(), fetchOrganizations(), fetchUsers()]);
     setLoading(false);
-  }, [fetchRequests, fetchOrganizations]);
+  }, [fetchRequests, fetchOrganizations, fetchUsers]);
 
   useEffect(() => {
     let mounted = true;
@@ -99,6 +114,21 @@ export default function EnterpriseAdminDashboard() {
     }
   };
 
+  const handleReject = async (id: string) => {
+    if (!confirm("Are you sure you want to reject this request?")) return;
+    
+    setProcessingId(id);
+    try {
+      await adminApi.rejectEnterpriseRequest(id);
+      alert("Enterprise request rejected.");
+      loadData();
+    } catch (err: unknown) {
+      alert("Error: " + getErrorMessage(err, "Failed to reject request."));
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   const handleToggleStatus = async (id: string, currentStatus: string) => {
     const newStatus = (currentStatus === "active" ? "suspended" : "active") as "active" | "suspended";
     if (!confirm(`Are you sure you want to ${newStatus === "suspended" ? "suspend" : "reactivate"} this organization?`)) return;
@@ -119,6 +149,16 @@ export default function EnterpriseAdminDashboard() {
       fetchOrganizations();
     } catch (err: unknown) {
       alert("Error: " + getErrorMessage(err, "Failed to delete organization."));
+    }
+  };
+
+  const handleRoleUpdate = async (userId: string, newRole: string) => {
+    if (!confirm(`Are you sure you want to update this user's platform role to ${newRole}?`)) return;
+    try {
+      await adminApi.updatePlatformRole(userId, newRole);
+      fetchUsers();
+    } catch (err: unknown) {
+      alert("Error: " + getErrorMessage(err, "Failed to update role."));
     }
   };
 
@@ -154,8 +194,8 @@ export default function EnterpriseAdminDashboard() {
           <div className={styles.statLabel}>Active Organizations</div>
         </div>
         <div className={styles.statCard}>
-          <div className={styles.statValue}>Healthy</div>
-          <div className={styles.statLabel}>Platform Status</div>
+          <div className={styles.statValue}>{users.length}</div>
+          <div className={styles.statLabel}>Total Users</div>
         </div>
         <div className={styles.statCard}>
           <div className={styles.statValue}>1.2k</div>
@@ -175,6 +215,12 @@ export default function EnterpriseAdminDashboard() {
           onClick={() => setActiveTab("organizations")}
         >
           Company Directory
+        </button>
+        <button 
+          className={`btn ${activeTab === "users" ? "btn-primary" : "btn-outline"}`}
+          onClick={() => setActiveTab("users")}
+        >
+          Users
         </button>
       </div>
 
@@ -238,6 +284,13 @@ export default function EnterpriseAdminDashboard() {
                             disabled={processingId === req.id}
                           >
                             {processingId === req.id ? "Approving..." : "Approve"}
+                          </button>
+                          <button 
+                            className="btn btn-outline btn-sm"
+                            onClick={() => handleReject(req.id)}
+                            disabled={processingId === req.id}
+                          >
+                            Reject
                           </button>
                         </div>
                       ) : (
@@ -308,6 +361,63 @@ export default function EnterpriseAdminDashboard() {
                           Delete
                         </button>
                       </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {activeTab === "users" && (
+        <div className={styles.tableContainer}>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Role</th>
+                <th>Platform Role</th>
+                <th>Tier</th>
+                <th>Joined</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.length === 0 ? (
+                <tr>
+                  <td colSpan={6}>
+                    <div className={styles.emptyState}>No users found.</div>
+                  </td>
+                </tr>
+              ) : (
+                users.map((u) => (
+                  <tr key={u.id}>
+                    <td>
+                      <strong>{u.full_name || "Unknown"}</strong>
+                    </td>
+                    <td>{u.role}</td>
+                    <td>
+                      <span className={`${styles.statusBadge} ${u.platform_role === 'super_admin' ? styles.status_approved : ''}`}>
+                        {u.platform_role}
+                      </span>
+                    </td>
+                    <td>{u.tier}</td>
+                    <td>
+                      {new Date(u.created_at).toLocaleDateString()}
+                    </td>
+                    <td>
+                      <select 
+                        value={u.platform_role}
+                        onChange={(e) => handleRoleUpdate(u.id, e.target.value)}
+                        className="select select-sm"
+                        style={{ padding: '0.25rem' }}
+                      >
+                        <option value="user">User</option>
+                        <option value="support">Support</option>
+                        <option value="billing_admin">Billing Admin</option>
+                        <option value="super_admin">Super Admin</option>
+                      </select>
                     </td>
                   </tr>
                 ))

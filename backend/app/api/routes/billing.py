@@ -57,6 +57,15 @@ async def create_checkout_session(req: CheckoutRequest, user: dict = Depends(get
 
     stripe.api_key = settings.stripe_secret_key
 
+    # IDOR Protection: Verify org ownership before checkout
+    if req.org_id:
+        if user.get("platform_role") != "super_admin":
+            if req.org_id != user.get("org_id"):
+                raise HTTPException(status_code=403, detail="Access denied: department mismatch.")
+            # The billing upgrade is an administrative action
+            if user.get("org_role") not in ["admin", "incubator_manager", "workspace_owner"]:
+                 raise HTTPException(status_code=403, detail="Missing permission to upgrade billing.")
+
     price_map = {
         "pro": settings.stripe_price_pro,
         "enterprise": settings.stripe_price_enterprise,

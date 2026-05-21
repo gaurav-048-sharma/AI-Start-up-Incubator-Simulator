@@ -34,6 +34,12 @@ current_jwt: contextvars.ContextVar[str] = contextvars.ContextVar("current_jwt",
 
 logger = structlog.get_logger()
 
+def invalidate_profile_cache(user_id: str):
+    """Force validation of platform role on the next request."""
+    if user_id in _PROFILE_CACHE:
+        del _PROFILE_CACHE[user_id]
+        
+
 
 # ═══════════════════════════════════════════════════════════════════
 # PLATFORM ROLES — global system-level access
@@ -84,9 +90,11 @@ ASSIGNABLE_TENANT_ROLES = {
     if role != WORKSPACE_OWNER_ROLE
 }
 
-# Legacy alias for backwards-compatible imports
-# Include tenant hierarchy and map platform super_admin to its platform value
-ROLE_HIERARCHY = {**TENANT_ROLE_HIERARCHY, "super_admin": PLATFORM_ROLES.get("super_admin", 100)}
+# Legacy alias for backwards-compatible imports.
+# CRITICAL: super_admin is a PLATFORM role, NEVER a tenant role.
+# It must NOT appear in this hierarchy to prevent privilege escalation
+# (e.g. a rogue org admin assigning 'super_admin' as a tenant role).
+ROLE_HIERARCHY = {**TENANT_ROLE_HIERARCHY}
 
 ROLE_DESCRIPTIONS = {
     "viewer":                "Read-only access to shared ideas and reports",
@@ -192,19 +200,25 @@ ROLE_PERMISSIONS[WORKSPACE_OWNER_ROLE] = list(ROLE_PERMISSIONS["admin"])
 
 
 def has_permission(user_role: str, required_permission: str) -> bool:
-    """Check if a TENANT role has a specific permission."""
-    # Platform super_admin should have all permissions implicitly
-    if user_role == "super_admin":
-        return True
+    """Check if a TENANT role has a specific permission.
+    
+    IMPORTANT: This function ONLY checks tenant roles.
+    Platform super_admin bypass is handled by the calling dependency
+    (require_permission, require_minimum_role, etc.).
+    Never pass platform_role to this function.
+    """
     perms = ROLE_PERMISSIONS.get(user_role, [])
     return required_permission in perms
 
 
 def has_role_level(user_role: str, minimum_role: str) -> bool:
-    """Check if a TENANT role level meets or exceeds the minimum."""
-    # Use ROLE_HIERARCHY which includes tenant roles and maps super_admin to platform value
-    user_level = ROLE_HIERARCHY.get(user_role, 0)
-    min_level = ROLE_HIERARCHY.get(minimum_role, 999)
+    """Check if a TENANT role level meets or exceeds the minimum.
+    
+    Uses TENANT_ROLE_HIERARCHY only. Platform roles are never
+    compared here — super_admin bypass is in the calling dependency.
+    """
+    user_level = TENANT_ROLE_HIERARCHY.get(user_role, 0)
+    min_level = TENANT_ROLE_HIERARCHY.get(minimum_role, 999)
     return user_level >= min_level
 
 
@@ -226,9 +240,16 @@ def has_platform_level(platform_role: str, minimum: str) -> bool:
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
-    Simple in-memory sliding window rate limiter.
+    In-memory sliding window rate limiter.
+    Applies stricter limits to unauthenticated/public endpoints.
     For production, replace with Redis-backed SlowAPI.
     """
+
+    # Public endpoints that get a stricter rate limit
+    STRICT_PATHS = {
+        "/api/admin/request": 5,     # 5 requests/min for public enterprise request submissions
+        "/api/enterprise/request": 5, # Legacy alias
+    }
 
     def __init__(self, app, requests_per_minute: int = 60, burst_limit: int = 10):
         super().__init__(app)
@@ -254,28 +275,29 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         client_ip = self._get_client_ip(request)
         now = time.time()
-        self._clean_window(client_ip, now)
 
-        # Check if user is authenticated and is a super_admin to bypass rate limit
-        # We can't easily check the token here because this middleware might run before auth
-        # But we can check after the profile lookup if we moved this.
-        # For now, I'll keep it simple: if the path is an admin path, we can be more lenient.
-        if request.url.path.startswith("/api/admin/"):
-             pass # Will check role inside the route if needed, or just let it pass for now
+        # Apply stricter limits to public/unauthenticated endpoints
+        effective_rpm = self.STRICT_PATHS.get(request.url.path, self.rpm)
 
-        if len(self._windows[client_ip]) >= self.rpm:
-            logger.warning("Rate limit exceeded", client_ip=client_ip, path=request.url.path)
+        # Use a separate bucket key for strict endpoints to prevent
+        # normal API usage from consuming the tight public budget
+        bucket_key = f"{client_ip}:{request.url.path}" if request.url.path in self.STRICT_PATHS else client_ip
+
+        self._clean_window(bucket_key, now)
+
+        if len(self._windows[bucket_key]) >= effective_rpm:
+            logger.warning("Rate limit exceeded", client_ip=client_ip, path=request.url.path, limit=effective_rpm)
             return JSONResponse(
                 status_code=429,
-                content={"error": "Rate limit exceeded", "detail": f"Max {self.rpm} requests per minute"},
+                content={"error": "Rate limit exceeded", "detail": f"Max {effective_rpm} requests per minute"},
                 headers={"Retry-After": "60"},
             )
 
-        self._windows[client_ip].append(now)
+        self._windows[bucket_key].append(now)
 
         response = await call_next(request)
-        response.headers["X-RateLimit-Limit"] = str(self.rpm)
-        response.headers["X-RateLimit-Remaining"] = str(self.rpm - len(self._windows[client_ip]))
+        response.headers["X-RateLimit-Limit"] = str(effective_rpm)
+        response.headers["X-RateLimit-Remaining"] = str(effective_rpm - len(self._windows[bucket_key]))
         return response
 
 
@@ -314,20 +336,18 @@ class TimingMiddleware(BaseHTTPMiddleware):
 
 class TenantContextMiddleware(BaseHTTPMiddleware):
     """
-    Validates the X-Org-Id header and injects tenant context into request.state.
-    This replaces the anti-pattern of storing current_org_id in the database.
-    
-    After this middleware runs:
-      request.state.org_id   — the validated org UUID (or None)
-      request.state.org_role — the user's role inside that org (or None)
+    Injects tenant context defaults into request.state.
+    The actual org resolution is performed in get_current_user() via
+    the X-Org-Id header. This middleware ensures request.state fields
+    are always initialised for downstream middleware/handlers.
     """
 
     async def dispatch(self, request: Request, call_next):
-        # Initialize defaults
+        # Initialize defaults so downstream code can always access these
         request.state.org_id = None
         request.state.org_role = None
-        
-        # Pass through for non-API and unauthenticated requests
+        request.state.org_status = None
+        request.state.org_read_only = False
         response = await call_next(request)
         return response
 
@@ -454,6 +474,7 @@ async def get_current_user(
             org_id = None
         org_role = None
         is_owner = False
+        org_read_only = False
 
         # Super Admins only resolve org context if they explicitly provide it.
         # They are NOT restricted by memberships.
@@ -469,6 +490,7 @@ async def get_current_user(
                 "org_id": org_id,
                 "org_role": org_role,
                 "org_owner": False,
+                "org_read_only": False,
                 "mfa_active": aal == "aal2",
                 "mfa_aal": aal,
                 "full_name": user_meta.get("full_name", ""),
@@ -477,7 +499,33 @@ async def get_current_user(
 
         if org_id:
             try:
-                # Reuse the same client instance if possible
+                # Fetch org details + membership in a single pass where possible
+                org_details = await asyncio.to_thread(
+                    lambda: supabase.table("organizations")
+                    .select("owner_id, status, subscription_status")
+                    .eq("id", org_id)
+                    .single()
+                    .execute()
+                )
+
+                # ── Org status enforcement ──────────────────────────
+                if org_details.data and isinstance(org_details.data, dict):
+                    org_status = org_details.data.get("status", "active")
+                    sub_status = org_details.data.get("subscription_status", "active")
+
+                    if org_status == "suspended":
+                        raise HTTPException(
+                            status_code=403,
+                            detail="This organization has been suspended. Contact your administrator.",
+                        )
+
+                    if sub_status in ("canceled", "past_due", "suspended"):
+                        org_read_only = True
+
+                    if org_details.data.get("owner_id") == user_id:
+                        is_owner = True
+
+                # Resolve membership
                 membership = await asyncio.to_thread(
                     lambda: supabase.table("organization_members")
                     .select("role")
@@ -488,31 +536,16 @@ async def get_current_user(
                 )
                 if membership.data and isinstance(membership.data, dict):
                     org_role = membership.data.get("role")
-                    owner_check = await asyncio.to_thread(
-                        lambda: supabase.table("organizations")
-                        .select("owner_id")
-                        .eq("id", org_id)
-                        .single()
-                        .execute()
-                    )
-                    if owner_check.data and isinstance(owner_check.data, dict) and owner_check.data.get("owner_id") == user_id:
-                        is_owner = True
+                    if is_owner:
                         org_role = WORKSPACE_OWNER_ROLE
+                elif is_owner:
+                    org_role = WORKSPACE_OWNER_ROLE
                 else:
-                    # Check ownership (workspace owner), then fall back to no access
-                    owner_check = await asyncio.to_thread(
-                        lambda: supabase.table("organizations")
-                        .select("owner_id")
-                        .eq("id", org_id)
-                        .single()
-                        .execute()
-                    )
-                    if owner_check.data and isinstance(owner_check.data, dict) and owner_check.data.get("owner_id") == user_id:
-                        is_owner = True
-                        org_role = WORKSPACE_OWNER_ROLE
-                    else:
-                        # Regular user tried to access an org they don't belong to
-                        org_id = None
+                    # Regular user tried to access an org they don't belong to
+                    org_id = None
+                    org_read_only = False
+            except HTTPException:
+                raise
             except Exception:
                 org_id = None
 
@@ -524,9 +557,10 @@ async def get_current_user(
             "org_id": org_id,
             "org_role": org_role,
             "org_owner": is_owner,
+            "org_read_only": org_read_only,
             "mfa_active": aal == "aal2",
             "mfa_aal": aal,
-            "full_name": user.user_metadata.get("full_name", ""),
+            "full_name": user_meta.get("full_name", ""),
             # Legacy compat — the user's profile role (NOT platform scope)
             "role": profile_role,
         }
@@ -656,6 +690,23 @@ def require_org_context():
             raise HTTPException(
                 status_code=403,
                 detail="X-Org-Id header required. Select an organization context."
+            )
+        return user
+    return _checker
+
+
+def require_write_access():
+    """
+    Dependency that blocks write operations when the org is in read-only mode.
+    Used for endpoints that modify org data (create ideas, update settings, etc.)
+    when subscription_status is 'past_due' or 'canceled'.
+    """
+    async def _checker(user: dict = Depends(get_current_user)):
+        if user.get("org_read_only") and user.get("platform_role") != "super_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="This organization's subscription is past due or canceled. "
+                       "Write operations are disabled. Please update your billing information."
             )
         return user
     return _checker

@@ -171,10 +171,11 @@ async def provision_enterprise_request(
     Provision an enterprise org immediately from a paid enterprise_request.
     Super admin only. This calls a server-side RPC that validates approval and creates the org.
     """
-    db = get_db_service()
+    from app.models.database import get_supabase_client
+    admin_client = get_supabase_client(admin=True)
     try:
-        # Call RPC - server key must have execute privileges
-        res = db._client.rpc("create_organization_from_request", {"req_id": request_id, "approver_id": user["id"]}).execute()
+        # Call RPC - must use admin client since execute privileges are revoked from PUBLIC
+        res = admin_client.rpc("create_organization_from_request", {"req_id": request_id, "approver_id": user["id"]}).execute()
         # Supabase returns result in res.data for RPC calls
         new_org_id = None
         if hasattr(res, 'data') and res.data:
@@ -377,6 +378,10 @@ async def update_user_platform_role(
         db._client.table("profiles").update({
             "platform_role": payload.platform_role,
         }).eq("id", user_id).execute()
+
+        # Invalidate the cache to apply new role immediately
+        from app.middleware.security import invalidate_profile_cache
+        invalidate_profile_cache(user_id)
 
         await log_audit_event(
             user_id=user["id"],

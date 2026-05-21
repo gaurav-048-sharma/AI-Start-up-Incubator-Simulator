@@ -134,6 +134,14 @@ export default function TeamPage() {
   const handleCreateOrg = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newOrgName) return;
+
+    // SECURITY GUARD: Only super_admin can create root organizations
+    if (createType === "root" && !isSuperAdmin) {
+      alert("Only platform administrators can create root hubs. Please submit an enterprise request for official onboarding.");
+      setShowCreate(false);
+      return;
+    }
+
     setActionError(null);
     try {
       const slug = newOrgName.toLowerCase().replace(/ /g, "-");

@@ -343,7 +343,6 @@ def test_token_costs():
 
 def test_role_hierarchy():
     from app.middleware.security import ROLE_HIERARCHY, has_role_level
-    assert ROLE_HIERARCHY["super_admin"] > ROLE_HIERARCHY["admin"]
     assert ROLE_HIERARCHY["admin"] > ROLE_HIERARCHY["incubator_manager"]
     assert ROLE_HIERARCHY["incubator_manager"] > ROLE_HIERARCHY["innovation_lead"]
     assert ROLE_HIERARCHY["innovation_lead"] > ROLE_HIERARCHY["investor_advisor"]
@@ -354,14 +353,10 @@ def test_role_hierarchy():
     # Level checks
     assert has_role_level("admin", "founder") is True
     assert has_role_level("viewer", "admin") is False
-    assert has_role_level("super_admin", "super_admin") is True
 
 
 def test_role_permissions():
     from app.middleware.security import has_permission
-    # Super admin has everything
-    assert has_permission("super_admin", "manage_billing") is True
-    assert has_permission("super_admin", "anything") is True
 
     # Founder can launch workflows but not manage users
     assert has_permission("founder", "launch_workflow") is True
@@ -390,10 +385,10 @@ def test_role_descriptions():
 
 
 def test_user_role_enum():
-    from app.models.schemas import UserRole
-    assert UserRole.FOUNDER.value == "founder"
-    assert UserRole.SUPER_ADMIN.value == "super_admin"
-    assert len(UserRole) == 8
+    from app.models.schemas import TenantRole, PlatformRole
+    assert TenantRole.FOUNDER.value == "founder"
+    assert PlatformRole.SUPER_ADMIN.value == "super_admin"
+    assert len(TenantRole) == 15
 
 
 def test_subscription_tier_enum():
@@ -424,11 +419,10 @@ async def test_org_roles_endpoint(client: AsyncClient):
     assert r.status_code == 200
     data = r.json()
     assert "roles" in data
-    assert len(data["roles"]) == 16
+    assert len(data["roles"]) == 15
     role_ids = {r["id"] for r in data["roles"]}
     assert "founder" in role_ids
     assert "admin" in role_ids
-    assert "super_admin" in role_ids
     assert "investor_advisor" in role_ids
     assert "incubator_manager" in role_ids
 

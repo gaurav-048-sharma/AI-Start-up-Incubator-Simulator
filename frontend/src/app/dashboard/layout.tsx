@@ -144,31 +144,24 @@ export default function DashboardLayout({
           </div>
         </div>
 
-        {platformRole !== "super_admin" && organizations.length > 0 && (
+        {(platformRole === "super_admin" || organizations.length > 0) && (
           <div className={styles.workspaceSelector}>
-            <div className={styles.sidebarSection}>Workspace</div>
+            <div className={styles.sidebarSection}>
+              {platformRole === "super_admin" ? "Platform Context" : "Workspace"}
+            </div>
             <select
               value={activeOrgId || ""}
               onChange={(e) => switchOrganization(e.target.value)}
               className={styles.orgSelect}
               aria-label="Workspace"
             >
+              {platformRole === "super_admin" && <option value="">Global Overview</option>}
               {organizations.map((org) => (
                 <option key={org.id} value={org.id}>
                   {org.name}
                 </option>
               ))}
             </select>
-          </div>
-        )}
-
-        {platformRole === "super_admin" && (
-          <div className={styles.platformBadge}>
-            <div className={styles.sidebarSection}>Active Context</div>
-            <div className={styles.activeContext}>
-              <span className={styles.contextIcon}>🌐</span>
-              Global Platform View
-            </div>
           </div>
         )}
 
@@ -258,11 +251,12 @@ export default function DashboardLayout({
                 <div className={styles.userRole}>
                   {platformRole === "super_admin" ? (
                     <span className={styles.superAdminLabel}>
-                      Platform Admin · Unlimited
+                      Platform Admin · {activeOrgId ? (organizations.find(o => o.id === activeOrgId)?.name || 'Viewing Org') : 'Global'}
                     </span>
                   ) : (
                     <>
-                      {user?.user_metadata?.tier || "Free"} Plan · {credits !== null ? credits : "—"} credits
+                      {organizations.find(o => o.id === activeOrgId)?.my_role?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) || "Member"} · {user?.user_metadata?.tier || "Free"} 
+                      <br /> {credits !== null ? credits : "—"} credits
                     </>
                   )}
                 </div>

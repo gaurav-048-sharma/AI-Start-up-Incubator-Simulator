@@ -119,3 +119,5 @@ infra/docker/prometheus_data/
 infra/docker/redis_data/
 postgres_data/
 backend/.venv311/
+test_output.txt
+backend/tmp_test_422.py

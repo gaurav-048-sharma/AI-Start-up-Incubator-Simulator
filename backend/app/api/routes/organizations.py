@@ -84,7 +84,7 @@ class SSOConfigUpdateRequest(BaseModel):
 @router.get("/roles")
 async def list_roles():
     """List all available tenant roles with descriptions and hierarchy levels."""
-    # Return the combined ROLE_HIERARCHY so platform-level roles like super_admin are included
+    # Use TENANT_ROLE_HIERARCHY explicitly to ensure platform roles remain private.
     return {
         "roles": [
             {
@@ -94,7 +94,7 @@ async def list_roles():
                 "description": ROLE_DESCRIPTIONS.get(role, ""),
                 "assignable": role in ASSIGNABLE_TENANT_ROLES,
             }
-            for role, level in sorted(ROLE_HIERARCHY.items(), key=lambda x: x[1])
+            for role, level in sorted(TENANT_ROLE_HIERARCHY.items(), key=lambda x: x[1])
             if role != WORKSPACE_OWNER_ROLE
         ]
     }
@@ -159,14 +159,14 @@ async def create_org(
                 logger.warning("Parent org verification failed", error=str(e), parent_id=body.parent_id)
                 raise HTTPException(status_code=403, detail="Unable to verify parent organization permissions")
         else:
-            # Root org creation: require enterprise tier
-            user_tier = user.get("tier", "free")
-            if user_tier not in ("enterprise",):
-                raise HTTPException(
-                    status_code=403,
-                    detail="Organization creation requires an Enterprise subscription. "
-                           "Upgrade at /dashboard/settings or submit an enterprise request.",
-                )
+            # Root org creation: ONLY platform super_admins can create root organizations directly.
+            # Enterprise tier users must go through the Request -> Approval -> Payment flow
+            # which triggers the secure provisioning RPC or background task.
+            raise HTTPException(
+                status_code=403,
+                detail="Direct root organization creation is restricted to platform administrators. "
+                       "Please submit an enterprise request at /enterprise to begin onboarding.",
+            )
 
     org_id = str(uuid.uuid4())
     try:
@@ -393,6 +393,11 @@ async def update_org_sso(
     _role: dict = Depends(require_minimum_role("admin")),
 ):
     """Update SSO Configuration for an organization (org admin+ only)."""
+    # IDOR Protection: ensure user is a member of the org they are updating
+    if user.get("platform_role") != "super_admin":
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied: organization scope mismatch.")
+    
     from app.models.database import get_db_service
     db = get_db_service()
 
@@ -422,36 +427,7 @@ async def update_org_sso(
 
 # ── Members ──────────────────────────────────────────────────────
 
-@router.get("/{org_id}/members")
-async def list_members(org_id: str, user: dict = Depends(get_current_user)):
-    """List all members of an organization."""
-    from app.models.database import get_db_service
-    db = get_db_service()
 
-    # Verify membership or platform role
-    if user.get("platform_role") != "super_admin":
-        member_check = (
-            db._client.table("organization_members")
-            .select("id")
-            .eq("organization_id", org_id)
-            .eq("user_id", user["id"])
-            .execute()
-        )
-        if not (member_check.data):
-            raise HTTPException(status_code=403, detail="You are not a member of this organization")
-
-    try:
-        result = (
-            db._client.table("organization_members")
-            .select("id, user_id, role, joined_at, profiles(full_name, avatar_url, email:id)")
-            .eq("organization_id", org_id)
-            .order("joined_at")
-            .execute()
-        )
-        return {"members": result.data or []}
-    except Exception as e:
-        logger.error("Failed to list members", error=str(e))
-        return {"members": []}
 
 
 @router.patch("/{org_id}/members/{member_user_id}/role")
@@ -464,6 +440,10 @@ async def update_member_role(
     _role: dict = Depends(require_minimum_role("admin")),
 ):
     """Update a member's tenant role (org admin+ only)."""
+    # IDOR Protection
+    if user.get("platform_role") != "super_admin":
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied: organization scope mismatch.")
     from app.models.database import get_db_service
     db = get_db_service()
 
@@ -508,6 +488,10 @@ async def remove_member(
     _role: dict = Depends(require_minimum_role("admin")),
 ):
     """Remove a member from the organization (org admin+ only)."""
+    # IDOR Protection
+    if user.get("platform_role") != "super_admin":
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied: organization scope mismatch.")
     db = get_db_service()
 
     if member_user_id == user["id"]:
@@ -545,6 +529,10 @@ async def create_invitation(
     _perm: dict = Depends(require_permission("invite_members")),
 ):
     """Send an invitation to join the organization."""
+    # IDOR Protection
+    if user.get("platform_role") != "super_admin":
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied: organization scope mismatch.")
     db = get_db_service()
 
     if body.role not in ASSIGNABLE_TENANT_ROLES:
@@ -643,10 +631,8 @@ async def accept_invitation(token: str, user: dict = Depends(get_current_user)):
             "invited_by": inv.data["invited_by"],
             "joined_at": datetime.now(timezone.utc).isoformat(),
         }
-        db._client.table("organization_members").insert(membership).execute()
 
-        # Update invitation status
-        # Insert membership using admin client due to RLS restrictions
+        # Use admin client to bypass RLS for membership creation
         admin_client = database.get_supabase_client(admin=True)
         admin_client.table("organization_members").insert(membership).execute()
 
@@ -675,6 +661,10 @@ async def get_audit_log(
     user: dict = Depends(require_permission("view_audit_log")),
 ):
     """Get the audit log for an organization (org admin+ only)."""
+    # IDOR Protection
+    if user.get("platform_role") != "super_admin":
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied: organization scope mismatch.")
     from app.models.database import get_db_service
     db = get_db_service()
 

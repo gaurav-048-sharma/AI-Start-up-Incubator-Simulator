@@ -96,7 +96,9 @@ export default function NewIdeaPage() {
             </div>
             <div className={styles.actions}>
               <button className="btn btn-primary" onClick={() => setStep(2)}
-                disabled={!form.title || !form.description}>Next: Problem & Solution →</button>
+                disabled={form.title.length < 3 || form.description.length < 20}>Next: Problem & Solution →</button>
+              {(form.title.length > 0 && form.title.length < 3) && <div className={styles.errorMsg} style={{fontSize: '0.8rem', marginTop:'8px'}}>Title must be at least 3 characters.</div>}
+              {(form.description.length > 0 && form.description.length < 20) && <div className={styles.errorMsg} style={{fontSize: '0.8rem', marginTop:'4px'}}>Description must be at least 20 characters.</div>}
             </div>
           </div>
         )}

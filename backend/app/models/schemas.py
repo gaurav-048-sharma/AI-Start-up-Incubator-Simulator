@@ -23,8 +23,16 @@ class IdeaStatus(str, Enum):
     FAILED = "failed"
 
 
-class UserRole(str, Enum):
-    """Tenant-scoped user roles with hierarchy."""
+class PlatformRole(str, Enum):
+    """Global system-level roles."""
+    USER = "user"
+    SUPPORT = "support"
+    BILLING_ADMIN = "billing_admin"
+    SUPER_ADMIN = "super_admin"
+
+
+class TenantRole(str, Enum):
+    """Organization-scoped roles (tenant context)."""
     VIEWER = "viewer"
     TEAM_MEMBER = "team_member"
     FOUNDER = "founder"
@@ -32,7 +40,8 @@ class UserRole(str, Enum):
     INNOVATION_LEAD = "innovation_lead"
     INCUBATOR_MANAGER = "incubator_manager"
     ADMIN = "admin"
-    SUPER_ADMIN = "super_admin"
+    WORKSPACE_OWNER = "workspace_owner"
+
 
 
 class SubscriptionTier(str, Enum):
