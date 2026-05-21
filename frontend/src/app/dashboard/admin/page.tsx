@@ -71,10 +71,19 @@ export default function EnterpriseAdminDashboard() {
 
   useEffect(() => {
     let mounted = true;
+    
+    // Immediate check using local cache to prevent 403 flicker
+    const cachedRole = typeof window !== "undefined" ? localStorage.getItem("platformRole") : null;
+    if (cachedRole && cachedRole !== "super_admin") {
+      setIsUnauthorized(true);
+      setLoading(false);
+      return;
+    }
 
     authApi.me()
       .then((me) => {
         if (!mounted) return;
+        localStorage.setItem("platformRole", me.platform_role || "user");
         if (me.platform_role !== "super_admin") {
           setIsUnauthorized(true);
           setLoading(false);
@@ -82,10 +91,15 @@ export default function EnterpriseAdminDashboard() {
         }
         void loadData();
       })
-      .catch(() => {
+      .catch((err) => {
         if (!mounted) return;
-        setIsUnauthorized(true);
-        setLoading(false);
+        // If we have a cached admin role, try to load data anyway
+        if (cachedRole === "super_admin") {
+          void loadData();
+        } else {
+          setIsUnauthorized(true);
+          setLoading(false);
+        }
       });
 
     return () => {
@@ -186,20 +200,20 @@ export default function EnterpriseAdminDashboard() {
 
       <div className={styles.statsGrid}>
         <div className={styles.statCard}>
-          <div className={styles.statValue}>{requests.length}</div>
+          <div className={styles.statValue}>{requests.filter(r => r.status === 'pending').length}</div>
           <div className={styles.statLabel}>Pending Requests</div>
         </div>
         <div className={styles.statCard}>
           <div className={styles.statValue}>{organizations.length}</div>
-          <div className={styles.statLabel}>Active Organizations</div>
+          <div className={styles.statLabel}>Total Organizations</div>
         </div>
         <div className={styles.statCard}>
           <div className={styles.statValue}>{users.length}</div>
-          <div className={styles.statLabel}>Total Users</div>
+          <div className={styles.statLabel}>Platform Users</div>
         </div>
         <div className={styles.statCard}>
-          <div className={styles.statValue}>1.2k</div>
-          <div className={styles.statLabel}>Global Credits</div>
+          <div className={styles.statValue}>{requests.filter(r => r.status === 'approved' || r.status === 'pending_payment').length}</div>
+          <div className={styles.statLabel}>Processed Requests</div>
         </div>
       </div>
 

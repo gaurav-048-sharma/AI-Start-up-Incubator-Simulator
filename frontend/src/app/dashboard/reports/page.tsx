@@ -16,9 +16,30 @@ export default function ReportsPage() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Initial load
+    const stored = typeof window !== "undefined" ? localStorage.getItem("activeOrgId") : null;
+    setActiveOrgId(stored);
+
+    // Listen for context switching
+    const handleStorage = () => {
+      const current = localStorage.getItem("activeOrgId");
+      setActiveOrgId(current);
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
 
   useEffect(() => {
     async function load() {
+      if (!activeOrgId && typeof window !== "undefined" && !localStorage.getItem("activeOrgId")) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
       try {
         const ideasData = await ideasApi.list();
         const ideaList = ideasData.ideas || [];
@@ -35,12 +56,13 @@ export default function ReportsPage() {
         setReports(allReports);
       } catch {
         setReports([]);
+        setIdeas([]);
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, []);
+  }, [activeOrgId]);
 
   // Helper to parse basic markdown to HTML for a clean view
   const renderMarkdown = (text: string) => {

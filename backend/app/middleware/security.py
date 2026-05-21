@@ -406,16 +406,19 @@ async def get_current_user(
             logger.error("Database client initialization failed")
             raise HTTPException(status_code=500, detail="Database not configured")
 
+        if not credentials or not credentials.credentials:
+            raise HTTPException(status_code=401, detail="Missing authentication token")
+
         # Use the admin client to get user details
         try:
             user_response = await asyncio.to_thread(supabase.auth.get_user, credentials.credentials)
         except Exception as auth_err:
             logger.error("Supabase auth.get_user failed", error=str(auth_err))
-            raise HTTPException(status_code=401, detail="Invalid session")
+            raise HTTPException(status_code=401, detail=f"Invalid or expired session: {str(auth_err)}")
 
         if not user_response or not user_response.user:
             logger.warning("No user found in Supabase session")
-            raise HTTPException(status_code=401, detail="Invalid token")
+            raise HTTPException(status_code=401, detail="User session not found or has been revoked")
 
         user = user_response.user
         user_id = str(user.id)
@@ -513,7 +516,7 @@ async def get_current_user(
                     org_status = org_details.data.get("status", "active")
                     sub_status = org_details.data.get("subscription_status", "active")
 
-                    if org_status == "suspended":
+                    if org_status == "suspended" and platform_role != "super_admin":
                         raise HTTPException(
                             status_code=403,
                             detail="This organization has been suspended. Contact your administrator.",

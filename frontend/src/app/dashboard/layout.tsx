@@ -53,10 +53,11 @@ export default function DashboardLayout({
   const [platformRole, setPlatformRole] = useState<string>("user");
 
   useEffect(() => {
-    const stored = typeof window !== "undefined" ? localStorage.getItem("activeOrgId") : null;
-    if (stored) {
-      queueMicrotask(() => setActiveOrgId(stored));
-    }
+    const storedOrg = typeof window !== "undefined" ? localStorage.getItem("activeOrgId") : null;
+    const storedRole = typeof window !== "undefined" ? localStorage.getItem("platformRole") : "user";
+    
+    if (storedOrg) setActiveOrgId(storedOrg);
+    if (storedRole) setPlatformRole(storedRole);
   }, []);
 
   const switchOrganization = (orgId: string) => {
@@ -66,35 +67,38 @@ export default function DashboardLayout({
   };
 
   useEffect(() => {
-    async function loadHeader() {
+    const loadHeader = () => {
       try {
-        const [meData, notifData, creditsData, orgsData] = await Promise.allSettled([
-          authApi.me(),
-          notificationsApi.getUnreadCount(),
-          analyticsApi.getCredits(),
-          organizationsApi.list(),
-        ]);
+        // Core identity call
+        authApi.me().then(me => {
+          const role = me.platform_role || "user";
+          setPlatformRole(role);
+          localStorage.setItem("platformRole", role);
+        }).catch(() => {});
 
-        if (meData.status === "fulfilled") {
-          setPlatformRole(meData.value.platform_role || "user");
-        }
-        if (notifData.status === "fulfilled") setUnreadCount(notifData.value.unread_count);
-        if (creditsData.status === "fulfilled") setCredits(creditsData.value.credits);
-        if (orgsData.status === "fulfilled" && orgsData.value.organizations?.length > 0) {
-          setOrganizations(orgsData.value.organizations);
-          if (!activeOrgId && typeof window !== "undefined") {
-            const firstOrgId = orgsData.value.organizations[0].id;
-            setActiveOrgId(firstOrgId);
-            setActiveOrg(firstOrgId);
+        // Organizations (needed for layout logic)
+        organizationsApi.list().then(res => {
+          if (res.organizations?.length > 0) {
+            setOrganizations(res.organizations);
+            if (!activeOrgId) {
+              const id = res.organizations[0].id;
+              setActiveOrgId(id);
+              setActiveOrg(id);
+            }
           }
-          queueMicrotask(() => setOrgReady(true));
-        } else if (orgsData.status === "fulfilled") {
-          queueMicrotask(() => setOrgReady(true));
-        }
-      } catch {
-        /* backend may not be connected */
+          setOrgReady(true);
+        }).catch(() => setOrgReady(true));
+
+        // Background data
+        analyticsApi.getCredits().then(res => setCredits(res.credits)).catch(() => {});
+        notificationsApi.getUnreadCount().then(res => setUnreadCount(res.unread_count)).catch(() => {});
+
+      } catch (err) {
+        setOrgReady(true);
+      } finally {
+        setTimeout(() => setOrgReady(true), 800); // Shorter safety throttle
       }
-    }
+    };
     loadHeader();
 
     const interval = setInterval(loadHeader, 30000);
@@ -275,7 +279,7 @@ export default function DashboardLayout({
 
       {/* Main Content */}
       <main className={styles.mainContent}>
-        {!orgReady && platformRole !== "super_admin" ? (
+        {(platformRole !== "super_admin" && !orgReady) ? (
           <div className="flex items-center justify-center min-h-[60vh]">
             <div className="animate-spin text-3xl">🚀</div>
           </div>

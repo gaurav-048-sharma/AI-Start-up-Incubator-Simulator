@@ -235,10 +235,11 @@ async def list_all_organizations(
     _role: dict = Depends(require_platform_role("support")),
 ):
     """List all organizations globally. Platform support+ role required."""
-    db = get_db_service()
+    from app.models.database import get_supabase_client
+    admin_client = get_supabase_client(admin=True)
     try:
         result = (
-            db._client.table("organizations")
+            admin_client.table("organizations")
             .select("id, name, slug, plan, max_members, status, subscription_status, created_at")
             .order("created_at", desc=True)
             .execute()
@@ -248,7 +249,7 @@ async def list_all_organizations(
         # Fallback for missing columns
         try:
             result = (
-                db._client.table("organizations")
+                admin_client.table("organizations")
                 .select("id, name, slug, plan, max_members, created_at")
                 .order("created_at", desc=True)
                 .execute()
@@ -272,13 +273,14 @@ async def delete_organization(
     _role: dict = Depends(require_platform_role("super_admin")),
 ):
     """Delete an organization globally. Super admin only."""
-    db = get_db_service()
+    from app.models.database import get_supabase_client
+    admin_client = get_supabase_client(admin=True)
     try:
         # Cascade cleanup: remove members, invitations, and orphaned data
-        db._client.table("organization_members").delete().eq("organization_id", org_id).execute()
-        db._client.table("invitations").delete().eq("organization_id", org_id).execute()
-        db._client.table("ideas").update({"organization_id": None}).eq("organization_id", org_id).execute()
-        db._client.table("organizations").delete().eq("id", org_id).execute()
+        admin_client.table("organization_members").delete().eq("organization_id", org_id).execute()
+        admin_client.table("invitations").delete().eq("organization_id", org_id).execute()
+        admin_client.table("ideas").update({"organization_id": None}).eq("organization_id", org_id).execute()
+        admin_client.table("organizations").delete().eq("id", org_id).execute()
 
         await log_audit_event(
             user_id=user["id"],
@@ -307,9 +309,10 @@ async def update_organization_status(
     _role: dict = Depends(require_platform_role("super_admin")),
 ):
     """Suspend or reactivate an organization. Super admin only."""
-    db = get_db_service()
+    from app.models.database import get_supabase_client
+    admin_client = get_supabase_client(admin=True)
     try:
-        db._client.table("organizations").update({"status": payload.status}).eq("id", org_id).execute()
+        admin_client.table("organizations").update({"status": payload.status}).eq("id", org_id).execute()
 
         await log_audit_event(
             user_id=user["id"],
@@ -340,10 +343,11 @@ async def list_platform_users(
     limit: int = 100,
 ):
     """List all platform users. Support+ role required."""
-    db = get_db_service()
+    from app.models.database import get_supabase_client
+    admin_client = get_supabase_client(admin=True)
     try:
         result = (
-            db._client.table("profiles")
+            admin_client.table("profiles")
             .select("id, full_name, role, platform_role, tier, credits, created_at")
             .order("created_at", desc=True)
             .limit(limit)
@@ -368,14 +372,15 @@ async def update_user_platform_role(
     _role: dict = Depends(require_platform_role("super_admin")),
 ):
     """Update a user's platform role. Super admin only."""
-    db = get_db_service()
+    from app.models.database import get_supabase_client
+    admin_client = get_supabase_client(admin=True)
 
     # Prevent self-demotion
     if user_id == user["id"] and payload.platform_role != "super_admin":
         raise HTTPException(status_code=400, detail="Cannot demote yourself")
 
     try:
-        db._client.table("profiles").update({
+        admin_client.table("profiles").update({
             "platform_role": payload.platform_role,
         }).eq("id", user_id).execute()
 
