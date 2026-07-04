@@ -5,22 +5,23 @@ Analytics API Routes — usage tracking, credit balance, and cost reporting.
 import structlog
 from fastapi import APIRouter, Depends
 from app.middleware.security import get_current_user
-
 logger = structlog.get_logger()
 router = APIRouter()
 
-
 @router.get("/usage")
-async def get_usage_summary(days: int = 30, user: dict = Depends(get_current_user)):
+async def get_usage_summary(
+    days: int = 30,
+    user: dict = Depends(get_current_user),
+):
     """Get usage analytics summary for the dashboard."""
     user_id = user["id"]
-    org_id = user.get("org_id")
+    org_id = None
     
     from app.services.analytics import get_analytics_service
     analytics = get_analytics_service()
 
     try:
-        summary = await analytics.get_usage_summary(user_id, days, organization_id=org_id)
+        summary = await analytics.get_usage_summary(user_id, days, organization_id=None)
         return summary
     except Exception:
         return {

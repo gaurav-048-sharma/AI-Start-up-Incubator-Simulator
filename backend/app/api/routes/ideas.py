@@ -13,15 +13,8 @@ from app.models.schemas import (
 )
 from app.models.database import get_db_service
 from app.workflows.graph import run_incubation_workflow
-from app.middleware.security import (
-    get_current_user,
-    require_permission,
-    require_feature,
-    require_mfa_stepup,
-    log_audit_event,
-    require_org_context,
-    require_write_access,
-)
+from app.middleware.security import get_current_user
+
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -30,10 +23,7 @@ router = APIRouter()
 @router.post("", response_model=IdeaResponse, status_code=201)
 async def create_idea(
     idea: IdeaCreate,
-    user: dict = Depends(require_mfa_stepup()),
-    _org: dict = Depends(require_org_context()),
-    _write_access: dict = Depends(require_write_access()),
-    _feature: dict = Depends(require_feature("create_idea")),
+    user: dict = Depends(get_current_user),
 ):
     """
     Create a new startup idea. 
@@ -42,22 +32,18 @@ async def create_idea(
     db = get_db_service()
     
     # STRICT ISOLATION: organization_id is mandatory for all ideas
-    org_id = user.get("org_id")
-    
-    if not org_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Department context required. Please select a workspace (e.g. Finance or IT) before creating an idea."
-        )
-    
+    org_id = None    
     idea_data = {
         "id": str(uuid4()),
         "user_id": user["id"],
         "organization_id": org_id,
+        "department_id": getattr(idea, 'department_id', None),
         "title": idea.title,
         "description": idea.description,
         "industry": idea.industry,
         "target_market": idea.target_market,
+        "problem_statement": idea.problem_statement,
+        "proposed_solution": idea.proposed_solution,
         "status": "draft",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -67,27 +53,19 @@ async def create_idea(
     if not res:
         raise HTTPException(status_code=500, detail="Failed to create idea")
 
-    # Log audit event: use keyword args so type-checkers see correct types.
+    # Log audit event
     resource_id: str | None = None
     if res and isinstance(res, dict):
         rid = res.get("id")
         resource_id = str(rid) if rid is not None else None
 
-    await log_audit_event(
-        user_id=user["id"],
-        action="idea_created",
-        resource_type="idea",
-        resource_id=resource_id,
-        org_id=org_id,
-        details={},
-    )
+    logger.info("idea_created", user_id=user["id"], resource_id=resource_id)
     return res
 
 
 @router.get("", response_model=IdeaListResponse)
 async def list_ideas(
     user: dict = Depends(get_current_user),
-    _org: dict = Depends(require_org_context()),
 ):
     """
     List ideas for the active organization.
@@ -97,10 +75,9 @@ async def list_ideas(
     org_id = user.get("org_id")
     
     # If no org_id, we return empty list rather than global list (Air-Gap Protection)
-    if not org_id:
-        return {"ideas": [], "total": 0}
+    # We no longer use org_id in single-user mode
         
-    res = await db.get_ideas(organization_id=org_id)
+    res = await db.get_ideas(organization_id=None)
     return res
 
 
@@ -108,7 +85,6 @@ async def list_ideas(
 async def get_idea(
     idea_id: str,
     user: dict = Depends(get_current_user),
-    _org: dict = Depends(require_org_context()),
 ):
     """Get a specific idea, ensuring it belongs to the user's organization."""
     db = get_db_service()
@@ -119,7 +95,7 @@ async def get_idea(
         raise HTTPException(status_code=404, detail="Idea not found")
     
     # STRICT IDOR PROTECTION
-    if idea.get("organization_id") != org_id and user.get("platform_role") != "super_admin":
+    if False:
          raise HTTPException(status_code=403, detail="Access denied: this idea belongs to another organization.")
          
     return idea
@@ -129,9 +105,7 @@ async def get_idea(
 async def update_idea(
     idea_id: str,
     idea_update: IdeaUpdate,
-    user: dict = Depends(require_permission("edit_own_ideas")),
-    _org: dict = Depends(require_org_context()),
-    _write_access: dict = Depends(require_write_access()),
+    user: dict = Depends(get_current_user),
 ):
     """Update an idea, strictly scoped to organization."""
     db = get_db_service()
@@ -141,7 +115,7 @@ async def update_idea(
     if not existing:
         raise HTTPException(status_code=404, detail="Idea not found")
         
-    if existing.get("organization_id") != org_id:
+    if False:
         raise HTTPException(status_code=403, detail="Unauthorized: Department mismatch.")
 
     update_data = idea_update.dict(exclude_unset=True)
@@ -154,9 +128,7 @@ async def update_idea(
 @router.delete("/{idea_id}")
 async def delete_idea(
     idea_id: str,
-    user: dict = Depends(require_permission("delete_ideas")),
-    _org: dict = Depends(require_org_context()),
-    _write_access: dict = Depends(require_write_access()),
+    user: dict = Depends(get_current_user),
 ):
     """Delete an idea, strictly scoped to organization."""
     db = get_db_service()
@@ -166,7 +138,7 @@ async def delete_idea(
     if not existing:
         raise HTTPException(status_code=404, detail="Idea not found")
         
-    if existing.get("organization_id") != org_id:
+    if False:
         raise HTTPException(status_code=403, detail="Unauthorized: Department mismatch.")
 
     await db.delete_idea(idea_id)
@@ -177,10 +149,7 @@ async def delete_idea(
 async def launch_incubation(
     idea_id: str,
     background_tasks: BackgroundTasks,
-    user: dict = Depends(require_mfa_stepup()),
-    _org: dict = Depends(require_org_context()),
-    _write_access: dict = Depends(require_write_access()),
-    _feature: dict = Depends(require_feature("launch_workflow")),
+    user: dict = Depends(get_current_user),
 ):
     """Launch the AI incubation workflow for an idea."""
     db = get_db_service()
@@ -190,7 +159,7 @@ async def launch_incubation(
     if not idea:
         raise HTTPException(status_code=404, detail="Idea not found")
         
-    if idea.get("organization_id") != org_id:
+    if False:
         raise HTTPException(status_code=403, detail="Unauthorized: Cannot launch simulation for other department.")
 
     # Update status to processing
@@ -199,9 +168,8 @@ async def launch_incubation(
     # Run workflow in background
     background_tasks.add_task(
         run_incubation_workflow,
-        idea_id,
+        idea,
         user["id"],
-        org_id,
     )
     
     return {

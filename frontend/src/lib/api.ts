@@ -8,103 +8,41 @@ interface ApiOptions {
   skipOrgContext?: boolean;
 }
 
-async function getSupabaseAccessToken(): Promise<string | null> {
-  if (typeof window === "undefined" || !process.env.NEXT_PUBLIC_SUPABASE_URL) {
-    return null;
-  }
+async function getAuthHeaders(): Promise<HeadersInit> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
 
-  try {
-    const { createClient } = await import("./supabase/client");
-    const supabase = createClient();
-    if (!supabase) return null;
-
-    const { data } = await supabase.auth.getSession();
-    return data?.session?.access_token ?? null;
-  } catch {
-    return null;
-  }
-}
-
-async function getAuthHeaders(): Promise<Record<string, string>> {
-  const token = await getSupabaseAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-async function resolveOrgContext(): Promise<string | null> {
-  if (typeof window === "undefined") {
-    return null;
-  }
-
-  const existing = localStorage.getItem("activeOrgId");
-  if (existing) {
-    return existing;
-  }
-
-  const authHeaders = await getAuthHeaders();
-  if (!authHeaders.Authorization) {
-    return null;
-  }
-
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/me/`, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
-    });
-
-    if (!response.ok) {
-      return null;
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("access_token");
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
-
-    const me = await response.json().catch(() => null) as MeResponse | null;
-    const orgId = me?.current_org_id || null;
-    if (orgId) {
-      localStorage.setItem("activeOrgId", orgId);
-      window.dispatchEvent(new StorageEvent("storage", { key: "activeOrgId", newValue: orgId }));
-    }
-    return orgId;
-  } catch {
-    return null;
   }
+
+  return headers;
 }
+
+// Org Context handling removed for single-user auth mode
 
 /**
  * Core API request function.
  * Automatically injects:
- *   - Authorization header from Supabase JWT
+ *   - Authorization header from localStorage
  *   - X-Org-Id header from localStorage (for tenant-scoped requests)
  */
 export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
-  const { method = "GET", body, headers = {}, skipOrgContext = false } = options;
+  const { method = "GET", body, headers = {} } = options;
 
-  // Resolve active org from localStorage (Slack/GitHub-style multi-org switching)
-  let activeOrgId =
-    !skipOrgContext && typeof window !== "undefined"
-      ? localStorage.getItem("activeOrgId")
-      : null;
-
-  if (!skipOrgContext && !activeOrgId && endpoint !== "/api/me/" && endpoint !== "/api/me") {
-    activeOrgId = await resolveOrgContext();
-  }
+  const authHeaders = await getAuthHeaders();
 
   const config: RequestInit = {
     method,
     headers: {
-      "Content-Type": "application/json",
-      ...(activeOrgId ? { "X-Org-Id": activeOrgId } : {}),
+      ...(authHeaders as Record<string, string>),
       ...headers,
     },
   };
-
-  // Inject Supabase JWT
-  const authHeaders = await getAuthHeaders();
-  Object.assign(config.headers as Record<string, string>, authHeaders);
-
-  if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL && activeOrgId) {
-    (config.headers as Record<string, string>)["X-Org-Id"] = activeOrgId;
-  }
 
   if (body) {
     config.body = JSON.stringify(body);
@@ -113,6 +51,10 @@ export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}):
   const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
 
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined") {
+      // Auto-redirect to login on authentication failure
+      window.location.href = "/login";
+    }
     const error = await response.json().catch(() => ({ detail: "Request failed" }));
     throw new Error(error.detail || `API Error: ${response.status}`);
   }
@@ -121,49 +63,12 @@ export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}):
 }
 
 export interface MeResponse {
-  user_id: string;
+  id: string;
   email: string | null;
-  full_name: string | null;
-  platform_role: string;
+  full_name?: string | null;
+  role: string;
   tier: string;
-  mfa_active: boolean;
-  mfa_aal: string;
-  current_org_id: string | null;
-  current_org_role: string | null;
-  current_org_owner: boolean;
-  memberships: Array<{
-    organization_id: string;
-    role: string | null;
-    is_owner: boolean;
-  }>;
 }
-
-// ── Org Context Helpers ─────────────────────────────────────────
-
-/** Set the active organization for multi-tab safe context switching */
-export function setActiveOrg(orgId: string) {
-  if (typeof window !== "undefined") {
-    localStorage.setItem("activeOrgId", orgId);
-    // Dispatch storage event for cross-tab sync
-    window.dispatchEvent(new StorageEvent("storage", { key: "activeOrgId", newValue: orgId }));
-  }
-}
-
-/** Get the current active organization ID */
-export function getActiveOrgId(): string | null {
-  if (typeof window !== "undefined") {
-    return localStorage.getItem("activeOrgId");
-  }
-  return null;
-}
-
-/** Clear active org context */
-export function clearActiveOrg() {
-  if (typeof window !== "undefined") {
-    localStorage.removeItem("activeOrgId");
-  }
-}
-
 
 // ── Ideas API ────────────────────────────────────────────────────
 export const ideasApi = {
@@ -234,8 +139,14 @@ export const notificationsApi = {
     apiRequest<{ success: boolean }>(`/api/notifications/${id}`, { method: "DELETE" }),
 };
 
+// Auth API
 export const authApi = {
-  me: () => apiRequest<MeResponse>("/api/me/"),
+  me: async () => {
+    return apiRequest<MeResponse>("/api/auth/me");
+  },
+  logout: async () => {
+    return apiRequest("/api/auth/logout", { method: "POST" });
+  }
 };
 
 // ── Settings API ─────────────────────────────────────────────────
@@ -254,50 +165,7 @@ export const comparisonApi = {
     }),
 };
 
-// ── Organizations API (Tenant-scoped) ────────────────────────────
-export const organizationsApi = {
-  list: () =>
-    apiRequest<{ organizations: Organization[] }>("/api/organizations"),
-  get: (orgId: string) =>
-    apiRequest<Organization>(`/api/organizations/${orgId}`),
-  create: (name: string, slug: string, parentId?: string) =>
-    apiRequest<Organization>("/api/organizations", {
-      method: "POST",
-      body: { name, slug, parent_id: parentId || null },
-    }),
-  getRoles: () =>
-    apiRequest<{ roles: RoleInfo[] }>("/api/organizations/roles"),
-  getMembers: (orgId: string) =>
-    apiRequest<{ members: OrgMember[] }>(`/api/organizations/${orgId}/members`),
-  updateMemberRole: (orgId: string, userId: string, role: string) =>
-    apiRequest<{ success: boolean }>(`/api/organizations/${orgId}/members/${userId}/role`, {
-      method: "PATCH",
-      body: { role },
-    }),
-  updateSSO: (orgId: string, ssoData: Record<string, unknown>) =>
-    apiRequest<{ success: boolean }>(`/api/organizations/${orgId}/sso`, {
-      method: "PATCH",
-      body: ssoData,
-    }),
-  removeMember: (orgId: string, userId: string) =>
-    apiRequest<{ success: boolean }>(`/api/organizations/${orgId}/members/${userId}`, {
-      method: "DELETE",
-    }),
-  invite: (orgId: string, email: string, role: string) =>
-    apiRequest<{ invitation_id: string; token: string; invite_url: string }>(
-      `/api/organizations/${orgId}/invitations`,
-      { method: "POST", body: { email, role } }
-    ),
-  acceptInvite: (token: string) =>
-    apiRequest<{ success: boolean; organization_id: string }>(
-      `/api/organizations/invitations/${token}/accept`,
-      { method: "POST" }
-    ),
-  getAuditLog: (orgId: string, limit: number = 50) =>
-    apiRequest<{ audit_log: AuditEntry[]; total: number }>(
-      `/api/organizations/${orgId}/audit?limit=${limit}`
-    ),
-};
+// Organizations API removed for single-user mode
 
 // ── Billing API ──────────────────────────────────────────────────
 export const billingApi = {

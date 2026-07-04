@@ -10,7 +10,7 @@ This project is an AI Venture Operating System—a SaaS platform that acts like 
 Frontend (Next.js 16)  ←→  Backend (FastAPI/Python)  ←→  Supabase (PostgreSQL)
      ↕                          ↕
   Supabase Auth          CrewAI + LangGraph + AutoGen
-  Supabase Realtime      OpenAI / Anthropic
+  Supabase Realtime      Gemini / Anthropic
 ```
 
 ## Quick Start
@@ -18,7 +18,7 @@ Frontend (Next.js 16)  ←→  Backend (FastAPI/Python)  ←→  Supabase (Postg
 ### Prerequisites
 - Node.js 20+
 - Python 3.12+
-- OpenAI API key
+- Gemini API key
 
 ### 1. Clone and configure
 ```bash
@@ -133,7 +133,7 @@ Research → Quality Gate → Plan → Build → Simulate → Complete
 
 - **Frontend**: Next.js 16, TypeScript, CSS Modules (Glassmorphism design system)
 - **Backend**: FastAPI, Python 3.12, Pydantic v2
-- **AI**: CrewAI, LangGraph, AutoGen, OpenAI/Anthropic
+- **AI**: CrewAI, LangGraph, AutoGen, Gemini/Anthropic
 - **Database**: Supabase (PostgreSQL + Auth + Realtime + Storage)
 - **Infrastructure**: Docker Compose, Redis, Prometheus, Grafana
 - **Deployment**: Vercel (frontend) + Railway (backend)

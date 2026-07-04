@@ -1,14 +1,13 @@
 """
 LLM service abstraction layer.
-Provides a unified interface for OpenAI and Anthropic with retry logic,
-fallback support, and token tracking.
+Provides a unified interface for NVIDIA NIM API models via OpenAI-compatible
+endpoint with retry logic, fallback support, and token tracking.
 """
 
 import structlog
 from typing import Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel, SimpleChatModel
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
 from typing import Any, List
@@ -30,54 +29,93 @@ from app.config import get_settings
 logger = structlog.get_logger()
 
 
+# ── Model role → settings attribute mapping ─────────────────────
+_MODEL_ATTR_MAP = {
+    "primary": "nvidia_primary_model",
+    "fast": "nvidia_fast_model",
+    "reasoning": "nvidia_reasoning_model",
+    "compact": "nvidia_compact_model",
+    "vision": "nvidia_vision_model",
+}
+
+# ── Default temperatures per role ────────────────────────────────
+_DEFAULT_TEMPS = {
+    "primary": 1.0,
+    "fast": 0.2,
+    "reasoning": 1.0,
+    "compact": 0.6,
+    "vision": 1.0,
+}
+
+# ── Default max_tokens per role ──────────────────────────────────
+_DEFAULT_MAX_TOKENS = {
+    "primary": 16384,
+    "fast": 1024,
+    "reasoning": 16384,
+    "compact": 4096,
+    "vision": 1024,
+}
+
+
 class LLMService:
     """
-    Unified LLM provider with automatic fallback.
-    Primary: OpenAI GPT-4o
-    Fallback: Anthropic Claude
+    Unified LLM provider using NVIDIA NIM API.
+    Primary: nvidia/nemotron-3-ultra-550b-a55b
+    Fallback: meta/llama-3.3-70b-instruct
     """
 
     def __init__(self, settings=None):
         self._settings = settings or get_settings()
         self._primary: Optional[BaseChatModel] = None
         self._fallback: Optional[BaseChatModel] = None
+        self._models: dict[str, BaseChatModel] = {}
         self._total_tokens_used = 0
         self._initialize_providers()
 
+    def _create_nvidia_llm(self, role: str) -> BaseChatModel:
+        """Create a ChatOpenAI instance pointed at the NVIDIA NIM endpoint."""
+        model_name = getattr(self._settings, _MODEL_ATTR_MAP[role])
+        temperature = _DEFAULT_TEMPS.get(role, self._settings.llm_temperature)
+        max_tokens = _DEFAULT_MAX_TOKENS.get(role, self._settings.llm_max_tokens)
+        api_key = self._settings.get_api_key_for_model(model_name)
+
+        if not api_key:
+            logger.warning(f"No API key available for model {model_name} (role={role})")
+            return InfiniteMockChatModel()
+
+        return ChatOpenAI(
+            model=model_name,
+            api_key=api_key,
+            base_url=self._settings.nvidia_base_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=self._settings.llm_request_timeout,
+            max_retries=self._settings.llm_max_retries,
+        )
+
     def _initialize_providers(self):
         """Initialize LLM providers based on available API keys."""
-        if self._settings.has_openai:
-            if "your_openai" in self._settings.openai_api_key.lower():
-                self._primary = InfiniteMockChatModel()
-                logger.warning("Using InfiniteMockChatModel for OpenAI because the API key is a placeholder")
-            else:
-                self._primary = ChatOpenAI(
-                    model=self._settings.openai_model,
-                    api_key=self._settings.openai_api_key,
-                    temperature=self._settings.openai_temperature,
-                    max_tokens=self._settings.openai_max_tokens,
-                    request_timeout=self._settings.llm_request_timeout,
-                    max_retries=self._settings.llm_max_retries,
-                )
-                logger.info("OpenAI provider initialized", model=self._settings.openai_model)
+        if self._settings.has_nvidia:
+            for role in _MODEL_ATTR_MAP:
+                try:
+                    self._models[role] = self._create_nvidia_llm(role)
+                except Exception as e:
+                    logger.warning(f"Failed to create {role} model", error=str(e))
 
-        if self._settings.has_anthropic:
-            if "your_anthropic" in self._settings.anthropic_api_key.lower():
-                self._fallback = InfiniteMockChatModel()
-                logger.warning("Using InfiniteMockChatModel for Anthropic because the API key is a placeholder")
-            else:
-                self._fallback = ChatAnthropic(
-                    model=self._settings.anthropic_model,
-                    api_key=self._settings.anthropic_api_key,
-                    temperature=self._settings.openai_temperature,
-                    max_tokens=self._settings.openai_max_tokens,
-                    default_request_timeout=self._settings.llm_request_timeout,
-                )
-                logger.info("Anthropic provider initialized", model=self._settings.anthropic_model)
+            self._primary = self._models.get("primary")
+            self._fallback = self._models.get("fast")
 
-        # Swap if anthropic is the primary provider
-        if self._settings.llm_provider == "anthropic" and self._fallback:
-            self._primary, self._fallback = self._fallback, self._primary
+            logger.info(
+                "NVIDIA NIM providers initialized",
+                models=list(self._models.keys()),
+                primary=self._settings.nvidia_primary_model,
+                fallback=self._settings.nvidia_fast_model,
+            )
+        else:
+            # No API key — use mock for development
+            self._primary = InfiniteMockChatModel()
+            self._fallback = InfiniteMockChatModel()
+            logger.warning("No NVIDIA API key configured — using mock LLM")
 
         if not self._primary and not self._fallback:
             logger.warning("No LLM providers configured — agents will not function")
@@ -92,10 +130,10 @@ class LLMService:
 
     def get_llm(self, provider: str = "auto") -> BaseChatModel:
         """
-        Get an LLM instance by provider name.
+        Get an LLM instance by role name.
 
         Args:
-            provider: 'openai', 'anthropic', or 'auto' (uses primary)
+            provider: 'primary', 'fast', 'reasoning', 'compact', 'vision', or 'auto'
 
         Returns:
             A configured LangChain chat model.
@@ -109,31 +147,30 @@ class LLMService:
             if self._fallback:
                 logger.warning("Primary LLM unavailable, using fallback")
                 return self._fallback
-            raise ValueError("No LLM providers are configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY.")
+            raise ValueError("No LLM providers are configured. Set NVIDIA_API_KEY.")
 
-        if provider == "openai":
-            if not self._settings.has_openai:
-                raise ValueError("OpenAI is not configured. Set OPENAI_API_KEY.")
-            if "your_openai" in self._settings.openai_api_key.lower():
-                return InfiniteMockChatModel()
-            return ChatOpenAI(
-                model=self._settings.openai_model,
-                api_key=self._settings.openai_api_key,
-                temperature=self._settings.openai_temperature,
-                max_tokens=self._settings.openai_max_tokens,
-            )
+        if provider in _MODEL_ATTR_MAP:
+            model = self._models.get(provider)
+            if model:
+                return model
+            if not self._settings.has_nvidia:
+                raise ValueError(f"NVIDIA NIM is not configured. Set NVIDIA_API_KEY.")
+            # Create on-demand if somehow missing
+            return self._create_nvidia_llm(provider)
 
-        if provider == "anthropic":
-            if not self._settings.has_anthropic:
-                raise ValueError("Anthropic is not configured. Set ANTHROPIC_API_KEY.")
-            return ChatAnthropic(
-                model=self._settings.anthropic_model,
-                api_key=self._settings.anthropic_api_key,
-                temperature=self._settings.openai_temperature,
-                max_tokens=self._settings.openai_max_tokens,
-            )
+        # Legacy compatibility: map old names to new roles
+        legacy_map = {
+            "gemini": "primary",
+            "anthropic": "fast",
+            "nvidia": "primary",
+        }
+        if provider in legacy_map:
+            return self.get_llm(legacy_map[provider])
 
-        raise ValueError(f"Unknown LLM provider: {provider}. Use 'openai', 'anthropic', or 'auto'.")
+        raise ValueError(
+            f"Unknown LLM provider: {provider}. "
+            f"Use 'primary', 'fast', 'reasoning', 'compact', 'vision', or 'auto'."
+        )
 
     @retry(
         stop=stop_after_attempt(3),
@@ -153,7 +190,7 @@ class LLMService:
         Args:
             prompt: The user/task prompt.
             system_prompt: Optional system message for context.
-            provider: Which LLM provider to use.
+            provider: Which LLM role to use.
 
         Returns:
             The generated text response.

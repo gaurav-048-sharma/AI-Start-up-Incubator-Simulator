@@ -16,15 +16,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.api.routes import ideas, agents, workflows, simulation, reports
 from app.api.routes import analytics, notifications, settings as settings_routes, comparison
-from app.api.routes import organizations as org_routes, enterprise
-from app.api.routes import me as me_routes
-from app.api.routes import mfa as mfa_routes
+from app.api.routes import otp_auth
+from app.api.websockets import router as ws_router
 from app.api.websockets import router as ws_router
 from app.middleware.security import (
     RateLimitMiddleware,
     RequestIDMiddleware,
     TimingMiddleware,
-    TenantContextMiddleware,
 )
 
 logger = structlog.get_logger()
@@ -99,7 +97,6 @@ def create_app() -> FastAPI:
     # ── Security Middleware (order matters — outermost first) ────
     app.add_middleware(TimingMiddleware)
     app.add_middleware(RequestIDMiddleware)
-    app.add_middleware(TenantContextMiddleware)
     app.add_middleware(
         RateLimitMiddleware,
         requests_per_minute=settings.rate_limit_rpm,
@@ -127,26 +124,10 @@ def create_app() -> FastAPI:
     app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
     app.include_router(settings_routes.router, prefix="/api/settings", tags=["Settings"])
     app.include_router(comparison.router, prefix="/api/ideas", tags=["Comparison"])
-    app.include_router(org_routes.router, prefix="/api/organizations", tags=["Organizations"])
-    app.include_router(me_routes.router, prefix="/api/me", tags=["Identity"])
     app.include_router(ws_router, tags=["WebSocket"])
 
-    # ── Platform Admin API Routes ────────────────────────────────
-    # All endpoints under /api/admin require platform_role: super_admin or support
-    app.include_router(enterprise.router, prefix="/api/admin", tags=["Platform Admin"])
-
-    # Legacy compatibility: keep /api/enterprise pointing to same router
-    app.include_router(enterprise.router, prefix="/api/enterprise", tags=["Enterprise (Legacy)"])
-
-    # ── MFA / Auth Routes ────────────────────────────────────────
-    app.include_router(mfa_routes.router, prefix="/api/auth", tags=["Authentication"])
-
-    # ── Billing Routes ───────────────────────────────────────────
-    try:
-        from app.api.routes.billing import router as billing_router
-        app.include_router(billing_router, prefix="/api/billing", tags=["Billing"])
-    except ImportError:
-        logger.warning("Billing routes not available")
+    # ── Auth Routes ────────────────────────────────────────
+    app.include_router(otp_auth.router, prefix="/api/auth", tags=["Authentication"])
 
     from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse
@@ -185,8 +166,7 @@ def create_app() -> FastAPI:
             "version": settings.app_version,
             "environment": settings.environment,
             "services": {
-                "openai": settings.has_openai,
-                "anthropic": settings.has_anthropic,
+                "nvidia": settings.has_nvidia,
                 "supabase": settings.has_supabase,
                 "tavily": settings.has_tavily,
                 "redis": cache.is_connected,

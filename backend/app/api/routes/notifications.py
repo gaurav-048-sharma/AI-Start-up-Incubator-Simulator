@@ -1,32 +1,18 @@
-﻿"""
+"""
 Notifications API Routes — in-app notification management.
 """
 
 import structlog
 from fastapi import APIRouter, Depends
 from app.middleware.security import get_current_user
-from pydantic import BaseModel
-from typing import Optional
-
 logger = structlog.get_logger()
 router = APIRouter()
 
-class NotificationResponse(BaseModel):
-    id: str
-    user_id: str
-    title: str
-    body: Optional[str] = None
-    notification_type: str = "info"
-    is_read: bool = False
-    action_url: Optional[str] = None
-    metadata: dict = {}
-    created_at: Optional[str] = None
-
 @router.get("")
 async def get_notifications(
-    user: dict = Depends(get_current_user),
     unread_only: bool = False,
-    limit: int = 20,
+    limit: int = 50,
+    user: dict = Depends(get_current_user),
 ):
     """Get user notifications with optional unread filter."""
     user_id = user["id"]

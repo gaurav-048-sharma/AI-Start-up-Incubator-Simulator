@@ -228,8 +228,8 @@ async def test_settings_get(client: AsyncClient):
     r = await client.get("/api/settings")
     assert r.status_code == 200
     data = r.json()
-    assert data["llm_provider"] in ["openai", "anthropic"]
-    assert data["llm_model"] in ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "claude-sonnet-4-20250514"]
+    assert data["llm_provider"] in ["gemini", "anthropic"]
+    assert data["llm_model"] in ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "claude-sonnet-4-20250514"]
     assert 1 <= data["max_iterations"] <= 15
     assert 0 <= data["quality_threshold"] <= 1
 
@@ -238,14 +238,14 @@ async def test_settings_get(client: AsyncClient):
 @pytest.mark.skipif(_auth_enabled(), reason="Requires demo-user (no Supabase auth)")
 async def test_settings_update(client: AsyncClient):
     r = await client.patch("/api/settings", json={
-        "llm_provider": "openai",
-        "llm_model": "gpt-4o-mini",
+        "llm_provider": "gemini",
+        "llm_model": "gemini-1.5-flash",
         "max_iterations": 8,
         "quality_threshold": 0.8,
     })
     assert r.status_code == 200
     data = r.json()
-    assert data["llm_model"] == "gpt-4o-mini"
+    assert data["llm_model"] == "gemini-1.5-flash"
     assert data["max_iterations"] == 8
 
 
@@ -334,7 +334,7 @@ def test_credit_costs():
 
 def test_token_costs():
     from app.services.analytics import TOKEN_COST_PER_1K
-    assert "gpt-4o" in TOKEN_COST_PER_1K
+    assert "gemini-2.5-flash" in TOKEN_COST_PER_1K
     assert "claude-sonnet-4-20250514" in TOKEN_COST_PER_1K
     assert all(v > 0 for v in TOKEN_COST_PER_1K.values())
 

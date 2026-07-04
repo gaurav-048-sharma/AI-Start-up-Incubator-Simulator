@@ -1,250 +1,139 @@
 "use client";
 
-import { useState, useRef, useEffect, Suspense } from "react";
-import Link from "next/link";
+import { useState, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import styles from "./auth.module.css";
 
-type MfaStep = "login" | "mfa_verify";
-
-interface MfaFactorInfo {
-  id: string;
-  friendly_name?: string;
-}
+type Step = "email" | "otp";
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextUrl = searchParams.get("next") || "/dashboard";
-  const mfaParam = searchParams.get("mfa");
 
+  const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // MFA state
-  const [step, setStep] = useState<MfaStep>(mfaParam === "required" ? "mfa_verify" : "login");
-  const [mfaCode, setMfaCode] = useState(["", "", "", "", "", ""]);
-  const [mfaFactor, setMfaFactor] = useState<MfaFactorInfo | null>(null);
-  const [mfaLoading, setMfaLoading] = useState(false);
+  const [otpCode, setOtpCode] = useState(["", "", "", "", "", ""]);
   const codeInputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  // If user lands on ?mfa=required, pre-load their MFA factor
-  useEffect(() => {
-    if (mfaParam === "required") {
-      loadMfaFactors();
-    }
-  }, [mfaParam]);
-
-  const loadMfaFactors = async () => {
-    try {
-      const { createClient } = await import("@/lib/supabase/client");
-      const supabase = createClient();
-      if (!supabase) return;
-
-      const { data } = await supabase.auth.mfa.listFactors();
-      if (data?.totp && data.totp.length > 0) {
-        const verifiedFactor = data.totp.find((f: { status: string }) => f.status === "verified");
-        if (verifiedFactor) {
-          setMfaFactor({ id: verifiedFactor.id, friendly_name: verifiedFactor.friendly_name });
-          setStep("mfa_verify");
-        }
-      }
-    } catch {
-      // silent
-    }
-  };
-
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!email) return;
+    
     setLoading(true);
     setError("");
 
     try {
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      if (supabaseUrl) {
-        const { createClient } = await import("@/lib/supabase/client");
-        const supabase = createClient();
-        if (!supabase) {
-          throw new Error("Authentication is not configured.");
-        }
-        const { error: authError } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        if (authError) {
-          setError(authError.message);
-          setLoading(false);
-          return;
-        }
-
-        // Check MFA assurance level after password login
-        const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-        
-        if (aalData?.currentLevel === "aal1" && aalData?.nextLevel === "aal2") {
-          // User has MFA enrolled — need to verify
-          const { data: factorsData } = await supabase.auth.mfa.listFactors();
-          if (factorsData?.totp && factorsData.totp.length > 0) {
-            const verifiedFactor = factorsData.totp.find((f: { status: string }) => f.status === "verified");
-            if (verifiedFactor) {
-              setMfaFactor({ id: verifiedFactor.id, friendly_name: verifiedFactor.friendly_name });
-              setStep("mfa_verify");
-              setLoading(false);
-              return;
-            }
-          }
-        }
-
-        // No MFA needed — proceed to dashboard
-        router.push(nextUrl);
-        return;
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001"}/api/auth/send-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to send OTP");
       }
-      router.push(nextUrl);
-    } catch {
-      router.push(nextUrl);
+      
+      setStep("otp");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Network error");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleMfaVerify = async () => {
-    const code = mfaCode.join("");
+  const handleVerifyOtp = async () => {
+    const code = otpCode.join("");
     if (code.length !== 6) {
       setError("Please enter a complete 6-digit code");
       return;
     }
 
-    if (!mfaFactor) {
-      setError("No MFA factor found. Please log in again.");
-      return;
-    }
-
-    setMfaLoading(true);
+    setLoading(true);
     setError("");
 
     try {
-      const { createClient } = await import("@/lib/supabase/client");
-      const supabase = createClient();
-      if (!supabase) throw new Error("Auth not configured");
-
-      // Create challenge
-      const { data: challengeData, error: challengeError } = await supabase.auth.mfa.challenge({
-        factorId: mfaFactor.id,
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001"}/api/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, otp: code }),
       });
-
-      if (challengeError || !challengeData) {
-        setError("Failed to create MFA challenge. Please try again.");
-        setMfaLoading(false);
-        return;
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.detail || "Invalid OTP");
       }
-
-      // Verify challenge with TOTP code
-      const { data: verifyData, error: verifyError } = await supabase.auth.mfa.verify({
-        factorId: mfaFactor.id,
-        challengeId: challengeData.id,
-        code,
-      });
-
-      if (verifyError) {
-        setError("Invalid verification code. Please check your authenticator app.");
-        setMfaCode(["", "", "", "", "", ""]);
-        codeInputRefs.current[0]?.focus();
-        setMfaLoading(false);
-        return;
-      }
-
-      if (verifyData) {
-        // Session upgraded to aal2 — redirect to dashboard
-        router.push(nextUrl);
-      }
+      
+      // Save JWT token
+      localStorage.setItem("access_token", data.access_token);
+      
+      // Redirect
+      window.location.href = nextUrl;
     } catch (err) {
-      setError(err instanceof Error ? err.message : "MFA verification failed");
-      setMfaCode(["", "", "", "", "", ""]);
+      setError(err instanceof Error ? err.message : "Network error");
+      setOtpCode(["", "", "", "", "", ""]);
+      codeInputRefs.current[0]?.focus();
     } finally {
-      setMfaLoading(false);
+      setLoading(false);
     }
   };
 
-  // Handle individual code digit input
   const handleCodeChange = (index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return; // digits only
-    
-    const newCode = [...mfaCode];
-    newCode[index] = value.slice(-1); // keep only last digit
-    setMfaCode(newCode);
-
-    // Auto-focus next input
-    if (value && index < 5) {
-      codeInputRefs.current[index + 1]?.focus();
-    }
-
-    // Auto-submit when all 6 digits entered
+    if (!/^\d*$/.test(value)) return;
+    const newCode = [...otpCode];
+    newCode[index] = value.slice(-1);
+    setOtpCode(newCode);
+    if (value && index < 5) codeInputRefs.current[index + 1]?.focus();
     if (newCode.every((d) => d !== "") && newCode.join("").length === 6) {
-      setTimeout(() => handleMfaVerify(), 100);
+      setTimeout(() => handleVerifyOtp(), 100);
     }
   };
 
   const handleCodeKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === "Backspace" && !mfaCode[index] && index > 0) {
+    if (e.key === "Backspace" && !otpCode[index] && index > 0) {
       codeInputRefs.current[index - 1]?.focus();
     }
-    if (e.key === "Enter") {
-      handleMfaVerify();
-    }
+    if (e.key === "Enter") handleVerifyOtp();
   };
 
   const handleCodePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
     const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
     if (pasted.length > 0) {
-      const newCode = [...mfaCode];
-      for (let i = 0; i < pasted.length; i++) {
-        newCode[i] = pasted[i];
-      }
-      setMfaCode(newCode);
+      const newCode = [...otpCode];
+      for (let i = 0; i < pasted.length; i++) newCode[i] = pasted[i];
+      setOtpCode(newCode);
       if (pasted.length === 6) {
-        setTimeout(() => handleMfaVerify(), 100);
+        setTimeout(() => handleVerifyOtp(), 100);
       } else {
         codeInputRefs.current[pasted.length]?.focus();
       }
     }
   };
 
-  const handleDemoLogin = () => {
-    router.push(nextUrl);
-  };
-
-  // ── MFA Verification Step ──────────────────────────────────────
-  if (step === "mfa_verify") {
+  if (step === "otp") {
     return (
       <div className={styles.authPage}>
         <div className={styles.orbTop} />
         <div className={styles.orbBottom} />
-
         <div className={`${styles.authCard} glass-card animate-fade-in`}>
           <div className={styles.logoContainer}>
-            <div className={styles.logo}>
-              <span className={styles.shieldIcon}>🛡️</span>
-            </div>
+            <div className={styles.logo}>🛡️</div>
             <div className={styles.logoGlow} />
           </div>
-          <h1 className={styles.title}>Two-Factor Verification</h1>
-          <p className={styles.subtitle}>
-            Enter the 6-digit code from your authenticator app
-            {mfaFactor?.friendly_name && (
-              <span className={styles.mfaFactorName}> ({mfaFactor.friendly_name})</span>
-            )}
-          </p>
+          <h1 className={styles.title}>Check your email</h1>
+          <p className={styles.subtitle}>We sent a 6-digit code to {email}</p>
 
-          {error && (
-            <div className={styles.errorBanner}>
-              <span>⚠️</span> {error}
-            </div>
-          )}
+          {error && <div className={styles.errorBanner}>⚠️ {error}</div>}
 
           <div className={styles.mfaCodeContainer}>
-            {mfaCode.map((digit, i) => (
+            {otpCode.map((digit, i) => (
               <input
                 key={i}
                 ref={(el) => { codeInputRefs.current[i] = el; }}
@@ -257,70 +146,38 @@ function LoginForm() {
                 onKeyDown={(e) => handleCodeKeyDown(i, e)}
                 onPaste={i === 0 ? handleCodePaste : undefined}
                 autoFocus={i === 0}
-                disabled={mfaLoading}
-                id={`mfa-code-${i}`}
-                autoComplete="one-time-code"
+                disabled={loading}
               />
             ))}
           </div>
 
-          <button
-            onClick={handleMfaVerify}
-            className="btn btn-primary btn-lg"
-            style={{ width: "100%", marginTop: "var(--space-4)" }}
-            disabled={mfaLoading || mfaCode.join("").length !== 6}
-            id="mfa-verify-btn"
-          >
-            {mfaLoading ? (
-              <><span className="loader" /> Verifying...</>
-            ) : (
-              "🔓 Verify & Sign In"
-            )}
+          <button onClick={handleVerifyOtp} className="btn btn-primary btn-lg" style={{ width: "100%", marginTop: "var(--space-4)" }} disabled={loading || otpCode.join("").length !== 6}>
+            {loading ? <><span className="loader" /> Verifying...</> : "Verify & Sign In"}
           </button>
-
-          <div className={styles.mfaHelpText}>
-            <p>Open your authenticator app (Google Authenticator, Authy, etc.) and enter the current code.</p>
-          </div>
-
-          <button
-            onClick={() => {
-              setStep("login");
-              setMfaCode(["", "", "", "", "", ""]);
-              setError("");
-              setMfaFactor(null);
-            }}
-            className={`btn btn-ghost ${styles.mfaBackBtn}`}
-            id="mfa-back-btn"
-          >
-            ← Back to Sign In
+          
+          <button onClick={() => setStep("email")} className={`btn btn-ghost ${styles.mfaBackBtn}`}>
+            ← Back
           </button>
         </div>
       </div>
     );
   }
 
-  // ── Standard Login Step ────────────────────────────────────────
   return (
     <div className={styles.authPage}>
-      {/* Floating orbs */}
       <div className={styles.orbTop} />
       <div className={styles.orbBottom} />
-
       <div className={`${styles.authCard} glass-card animate-fade-in`}>
         <div className={styles.logoContainer}>
           <div className={styles.logo}>🚀</div>
           <div className={styles.logoGlow} />
         </div>
-        <h1 className={styles.title}>Welcome Back</h1>
+        <h1 className={styles.title}>Welcome</h1>
         <p className={styles.subtitle}>Sign in to your AI Incubator account</p>
 
-        {error && (
-          <div className={styles.errorBanner}>
-            <span>⚠️</span> {error}
-          </div>
-        )}
+        {error && <div className={styles.errorBanner}>⚠️ {error}</div>}
 
-        <form onSubmit={handleLogin} className={styles.form}>
+        <form onSubmit={handleSendOtp} className={styles.form}>
           <div className={styles.fieldGroup}>
             <label className="input-label" htmlFor="login-email">Email</label>
             <input
@@ -331,68 +188,13 @@ function LoginForm() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              autoComplete="email"
+              autoFocus
             />
           </div>
-          <div className={styles.fieldGroup}>
-            <div className={styles.labelRow}>
-              <label className="input-label" htmlFor="login-password">Password</label>
-              <Link href="/reset-password" className={styles.forgotLink}>Forgot?</Link>
-            </div>
-            <input
-              id="login-password"
-              className="input"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-            />
-          </div>
-          <button
-            type="submit"
-            className="btn btn-primary btn-lg"
-            style={{ width: "100%" }}
-            disabled={loading}
-            id="login-btn"
-          >
-            {loading ? (
-              <><span className="loader" /> Signing in...</>
-            ) : (
-              "Sign In"
-            )}
+          <button type="submit" className="btn btn-primary btn-lg" style={{ width: "100%" }} disabled={loading}>
+            {loading ? <><span className="loader" /> Sending...</> : "Continue with Email"}
           </button>
         </form>
-
-        <div className={styles.divider}>
-          <span>or</span>
-        </div>
-
-        <button
-          onClick={handleDemoLogin}
-          className={`btn btn-secondary ${styles.demoBtn}`}
-          id="demo-login-btn"
-        >
-          ⚡ Continue as Demo User
-        </button>
-
-        <p className={styles.altLink}>
-          Don&apos;t have an account?{" "}
-          <Link href="/signup">Create Account</Link>
-        </p>
-
-        <div className={styles.features}>
-          <div className={styles.featureItem}>
-            <span>🔬</span> 5 AI Research Agents
-          </div>
-          <div className={styles.featureItem}>
-            <span>🎯</span> Investor Pitch Simulation
-          </div>
-          <div className={styles.featureItem}>
-            <span>📊</span> Full Analysis Reports
-          </div>
-        </div>
       </div>
     </div>
   );

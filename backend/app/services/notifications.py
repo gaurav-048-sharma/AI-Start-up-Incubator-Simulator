@@ -57,6 +57,9 @@ class NotificationService:
         limit: int = 20,
     ) -> list[dict]:
         """Get notifications for a user, optionally filtered to unread only."""
+        if not self._db._client:
+            return []
+            
         try:
             query = (
                 self._db._client.table("notifications")
@@ -76,6 +79,9 @@ class NotificationService:
 
     async def get_unread_count(self, user_id: str) -> int:
         """Get the count of unread notifications."""
+        if not self._db._client:
+            return 0
+            
         try:
             result = (
                 self._db._client.table("notifications")
@@ -91,6 +97,9 @@ class NotificationService:
 
     async def mark_read(self, notification_id: str, user_id: str) -> bool:
         """Mark a single notification as read."""
+        if not self._db._client:
+            return True
+            
         try:
             self._db._client.table("notifications").update(
                 {"is_read": True}
@@ -101,7 +110,10 @@ class NotificationService:
             return False
 
     async def mark_all_read(self, user_id: str) -> bool:
-        """Mark all notifications as read for a user."""
+        """Mark all unread notifications as read for a user."""
+        if not self._db._client:
+            return True
+            
         try:
             self._db._client.table("notifications").update(
                 {"is_read": True}
@@ -112,7 +124,10 @@ class NotificationService:
             return False
 
     async def delete_notification(self, notification_id: str, user_id: str) -> bool:
-        """Delete a specific notification."""
+        """Delete a notification."""
+        if not self._db._client:
+            return True
+            
         try:
             self._db._client.table("notifications").delete().eq(
                 "id", notification_id

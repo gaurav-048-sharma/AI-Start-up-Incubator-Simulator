@@ -4,15 +4,19 @@ Uses Pydantic Settings for type-safe environment variable loading.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+
+# Resolve .env relative to this file: backend/app/config.py -> ../../.env -> project root .env
+_ENV_FILE = str(Path(__file__).resolve().parent.parent.parent / ".env")
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file="../../.env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -22,25 +26,39 @@ class Settings(BaseSettings):
     app_name: str = "AI Start-up Incubator Simulator"
     app_version: str = "1.0.0"
     debug: bool = False
+    bypass_auth: bool = Field(default=False, description="Bypass all auth/RBAC — dev mode")
     environment: str = Field(default="development", description="development | staging | production")
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     cors_origins: str = "http://localhost:3000,http://localhost:3001"
 
-    # ── LLM Providers ────────────────────────────────────────────
-    openai_api_key: str = Field(default="", description="OpenAI API key")
-    openai_model: str = "gpt-4o"
-    openai_temperature: float = 0.7
-    openai_max_tokens: int = 4096
+    # ── LLM Providers (NVIDIA NIM API) ─────────────────────────────
+    # Key 1: Nemotron Ultra + Llama 3.3 70B
+    nvidia_api_key_1: str = Field(default="", description="NVIDIA API key for Nemotron Ultra & Llama 3.3")
+    # Key 2: DeepSeek V4 Flash + Qwen3
+    nvidia_api_key_2: str = Field(default="", description="NVIDIA API key for DeepSeek V4 & Qwen3")
+    # Key 3: Nemotron Nano VL 8B
+    nvidia_api_key_3: str = Field(default="", description="NVIDIA API key for Nemotron Nano VL")
 
-    anthropic_api_key: str = Field(default="", description="Anthropic API key (fallback)")
-    anthropic_model: str = "claude-sonnet-4-20250514"
+    nvidia_base_url: str = Field(default="https://integrate.api.nvidia.com/v1", description="NVIDIA NIM API base URL")
 
-    llm_provider: str = Field(default="openai", description="Primary LLM provider: openai | anthropic")
+    nvidia_primary_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
+    nvidia_fast_model: str = "meta/llama-3.3-70b-instruct"
+    nvidia_reasoning_model: str = "deepseek-ai/deepseek-v4-flash"
+    nvidia_compact_model: str = "qwen/qwen3-next-80b-a3b-instruct"
+    nvidia_vision_model: str = "nvidia/llama-3.1-nemotron-nano-vl-8b-v1"
+
+    llm_provider: str = Field(default="nvidia", description="Primary LLM provider: nvidia")
     llm_request_timeout: int = 120
     llm_max_retries: int = 3
+    llm_temperature: float = 0.7
+    llm_max_tokens: int = 4096
 
-    # ── Supabase ─────────────────────────────────────────────────
+    # ── Security & Authentication ────────────────────────────────
+    jwt_secret_key: str = Field(default="fallback-secret-key-change-in-prod", description="Secret key for JWTs")
+    jwt_expiry_hours: int = Field(default=24, description="JWT expiry in hours")
+
+    # ── Supabase (Kept for compatibility with other env vars if any) ──
     supabase_url: str = Field(default="", description="Supabase project URL")
     supabase_anon_key: str = Field(default="", description="Supabase anon/public key")
     supabase_service_role_key: str = Field(default="", description="Supabase service role key (server-side)")
@@ -93,17 +111,25 @@ class Settings(BaseSettings):
 
     @property
     def primary_llm_key(self) -> str:
-        if self.llm_provider == "anthropic":
-            return self.anthropic_api_key
-        return self.openai_api_key
+        return self.nvidia_api_key_1
 
     @property
-    def has_openai(self) -> bool:
-        return bool(self.openai_api_key)
+    def has_nvidia(self) -> bool:
+        return bool(self.nvidia_api_key_1 or self.nvidia_api_key_2 or self.nvidia_api_key_3)
 
-    @property
-    def has_anthropic(self) -> bool:
-        return bool(self.anthropic_api_key)
+    def get_api_key_for_model(self, model: str) -> str:
+        """Return the correct API key for a given model name."""
+        # Key 1: Nemotron Ultra + Llama 3.3
+        if model in (self.nvidia_primary_model, self.nvidia_fast_model):
+            return self.nvidia_api_key_1
+        # Key 2: DeepSeek V4 + Qwen3
+        if model in (self.nvidia_reasoning_model, self.nvidia_compact_model):
+            return self.nvidia_api_key_2
+        # Key 3: Nemotron Nano VL
+        if model == self.nvidia_vision_model:
+            return self.nvidia_api_key_3
+        # Fallback to key 1
+        return self.nvidia_api_key_1
 
     @property
     def has_tavily(self) -> bool:

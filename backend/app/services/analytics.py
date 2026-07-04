@@ -24,9 +24,11 @@ CREDIT_COSTS = {
 
 # Estimated cost per 1K tokens (USD)
 TOKEN_COST_PER_1K = {
-    "gpt-4o": 0.005,
-    "gpt-4o-mini": 0.00015,
-    "claude-sonnet-4-20250514": 0.003,
+    "nvidia/nemotron-3-ultra-550b-a55b": 0.002,
+    "meta/llama-3.3-70b-instruct": 0.0005,
+    "deepseek-ai/deepseek-v4-flash": 0.001,
+    "qwen/qwen3-next-80b-a3b-instruct": 0.0005,
+    "nvidia/llama-3.1-nemotron-nano-vl-8b-v1": 0.0003,
 }
 
 
@@ -43,7 +45,7 @@ class AnalyticsService:
         idea_id: Optional[str] = None,
         organization_id: Optional[str] = None,
         tokens_used: int = 0,
-        model: str = "gpt-4o",
+        model: str = "nvidia/nemotron-3-ultra-550b-a55b",
         metadata: Optional[dict] = None,
     ) -> Optional[dict]:
         """

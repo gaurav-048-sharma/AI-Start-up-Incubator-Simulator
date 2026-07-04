@@ -32,6 +32,7 @@ from app.middleware.security import (
     ROLE_DESCRIPTIONS,
     TENANT_ROLE_HIERARCHY,
     ASSIGNABLE_TENANT_ROLES,
+    ORG_OWNER_ROLE,
     WORKSPACE_OWNER_ROLE,
     require_org_context,
 )
@@ -67,7 +68,8 @@ class OrgUpdate(BaseModel):
 
 class InviteRequest(BaseModel):
     email: str = Field(..., description="Email to invite")
-    role: str = Field(default="team_member", description="Role to assign")
+    role: str = Field(default="member", description="Role to assign")
+    department_id: Optional[str] = Field(default=None, description="Department to assign")
 
 class RoleUpdateRequest(BaseModel):
     role: str = Field(..., description="New role to assign")
@@ -95,7 +97,7 @@ async def list_roles():
                 "assignable": role in ASSIGNABLE_TENANT_ROLES,
             }
             for role, level in sorted(TENANT_ROLE_HIERARCHY.items(), key=lambda x: x[1])
-            if role != WORKSPACE_OWNER_ROLE
+            if role != ORG_OWNER_ROLE
         ]
     }
 
@@ -148,7 +150,7 @@ async def create_org(
                 elif member.data:
                     member_role = member.data.get("role")
 
-                if not (is_owner or (member_role in ("admin", "incubator_manager"))):
+                if not (is_owner or (member_role in ("org_admin", "org_owner"))):
                     raise HTTPException(
                         status_code=403,
                         detail="Only organization admins or owners may create sub-organizations.",
@@ -189,7 +191,7 @@ async def create_org(
             "id": str(uuid.uuid4()),
             "organization_id": org_id,
             "user_id": user["id"],
-            "role": "admin",
+            "role": "org_admin",
             "joined_at": datetime.now(timezone.utc).isoformat(),
         }
         admin_client.table("organization_members").insert(membership).execute()
@@ -269,7 +271,7 @@ async def list_my_orgs(user: dict = Depends(get_current_user)):
                 "logo_url": org.get("logo_url"),
                 "plan": org["plan"],
                 "subscription_status": org.get("subscription_status", "active"),
-                "my_role": WORKSPACE_OWNER_ROLE if is_owner else m["role"],
+                "my_role": ORG_OWNER_ROLE if is_owner else m["role"],
                 "is_owner": is_owner,
             })
 
@@ -307,7 +309,7 @@ async def get_org(org_id: str, user: dict = Depends(get_current_user)):
             if not member.data:
                 raise HTTPException(status_code=403, detail="You are not a member of this organization")
             is_owner = org.data.get("owner_id") == user["id"]
-            my_role = WORKSPACE_OWNER_ROLE if is_owner else member.data["role"]
+            my_role = ORG_OWNER_ROLE if is_owner else member.data["role"]
 
         # Get member count
         members = (
@@ -390,7 +392,7 @@ async def update_org_sso(
     body: SSOConfigUpdateRequest,
     request: Request,
     user: dict = Depends(require_mfa_stepup()),
-    _role: dict = Depends(require_minimum_role("admin")),
+    _role: dict = Depends(require_minimum_role("org_admin")),
 ):
     """Update SSO Configuration for an organization (org admin+ only)."""
     # IDOR Protection: ensure user is a member of the org they are updating
@@ -437,7 +439,7 @@ async def update_member_role(
     body: RoleUpdateRequest,
     request: Request,
     user: dict = Depends(require_mfa_stepup()),
-    _role: dict = Depends(require_minimum_role("admin")),
+    _role: dict = Depends(require_minimum_role("org_admin")),
 ):
     """Update a member's tenant role (org admin+ only)."""
     # IDOR Protection
@@ -485,7 +487,7 @@ async def remove_member(
     member_user_id: str,
     request: Request,
     user: dict = Depends(require_mfa_stepup()),
-    _role: dict = Depends(require_minimum_role("admin")),
+    _role: dict = Depends(require_minimum_role("org_admin")),
 ):
     """Remove a member from the organization (org admin+ only)."""
     # IDOR Protection
@@ -650,6 +652,137 @@ async def accept_invitation(token: str, user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error("Failed to accept invitation", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to accept invitation")
+
+
+# ── Departments ──────────────────────────────────────────────────
+
+class DeptCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    slug: str = Field(..., min_length=2, max_length=50, pattern=r"^[a-z0-9-]+$")
+
+
+@router.post("/{org_id}/departments")
+async def create_department(
+    org_id: str,
+    body: DeptCreate,
+    request: Request,
+    user: dict = Depends(require_mfa_stepup()),
+    _role: dict = Depends(require_minimum_role("org_admin")),
+):
+    """Create a department within an organization (org admin+ only)."""
+    if user.get("platform_role") != "super_admin":
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied: organization scope mismatch.")
+    db = get_db_service()
+
+    dept_id = str(uuid.uuid4())
+    try:
+        dept_data = {
+            "id": dept_id,
+            "name": body.name,
+            "slug": body.slug,
+            "parent_id": org_id,
+            "is_department": True,
+            "plan": "enterprise",
+            "subscription_status": "active",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        result = db._client.table("organizations").insert(dept_data).execute()
+
+        await log_audit_event(
+            user_id=user["id"],
+            action="create_department",
+            resource_type="department",
+            resource_id=dept_id,
+            org_id=org_id,
+            details={"name": body.name, "slug": body.slug},
+            request=request,
+        )
+
+        return result.data[0] if result.data else dept_data
+    except Exception as e:
+        if "duplicate key" in str(e).lower() or "unique" in str(e).lower():
+            raise HTTPException(status_code=409, detail=f"Department slug '{body.slug}' already exists")
+        logger.error("Failed to create department", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to create department")
+
+
+@router.get("/{org_id}/departments")
+async def list_departments(
+    org_id: str,
+    user: dict = Depends(get_current_user),
+    _org: dict = Depends(require_org_context()),
+):
+    """List departments within an organization."""
+    if user.get("platform_role") != "super_admin":
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied: organization scope mismatch.")
+    db = get_db_service()
+
+    try:
+        result = (
+            db._client.table("organizations")
+            .select("id, name, slug, created_at")
+            .eq("parent_id", org_id)
+            .eq("is_department", True)
+            .execute()
+        )
+        return {"departments": result.data or []}
+    except Exception as e:
+        logger.error("Failed to list departments", error=str(e))
+        return {"departments": []}
+
+
+@router.delete("/{org_id}/departments/{dept_id}")
+async def delete_department(
+    org_id: str,
+    dept_id: str,
+    request: Request,
+    user: dict = Depends(require_mfa_stepup()),
+    _role: dict = Depends(require_minimum_role("org_admin")),
+):
+    """Delete a department (org admin+ only). Members are reassigned to the parent org."""
+    if user.get("platform_role") != "super_admin":
+        if user.get("org_id") != org_id:
+            raise HTTPException(status_code=403, detail="Access denied: organization scope mismatch.")
+    db = get_db_service()
+
+    try:
+        # Verify the department belongs to this org
+        dept = db._client.table("organizations").select("parent_id, is_department").eq("id", dept_id).single().execute()
+        if not dept.data or not dept.data.get("is_department") or dept.data.get("parent_id") != org_id:
+            raise HTTPException(status_code=404, detail="Department not found in this organization")
+
+        # Clear department_id from members (reassign to parent org)
+        admin_client = database.get_supabase_client(admin=True)
+        admin_client.table("organization_members").update(
+            {"department_id": None}
+        ).eq("department_id", dept_id).execute()
+
+        # Clear department_id from ideas
+        admin_client.table("ideas").update(
+            {"department_id": None}
+        ).eq("department_id", dept_id).execute()
+
+        # Delete the department
+        db._client.table("organizations").delete().eq("id", dept_id).execute()
+
+        await log_audit_event(
+            user_id=user["id"],
+            action="delete_department",
+            resource_type="department",
+            resource_id=dept_id,
+            org_id=org_id,
+            request=request,
+        )
+
+        return {"success": True, "deleted_department_id": dept_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete department", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete department")
 
 
 # ── Audit Log ────────────────────────────────────────────────────

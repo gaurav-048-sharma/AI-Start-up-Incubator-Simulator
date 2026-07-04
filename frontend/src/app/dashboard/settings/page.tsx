@@ -2,15 +2,15 @@
 
 import { useState, useEffect, useRef } from "react";
 import styles from "./settings.module.css";
-import { settingsApi, analyticsApi, mfaApi, type UserSettings, type MfaFactor } from "@/lib/api";
+import { settingsApi, analyticsApi, type UserSettings } from "@/lib/api";
 
 type MfaSetupStep = "idle" | "enrolling" | "scan_qr" | "verify" | "success";
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<UserSettings>({
     user_id: "demo-user",
-    llm_provider: "openai",
-    llm_model: "gpt-4o",
+    llm_provider: "nvidia",
+    llm_model: "nvidia/nemotron-3-ultra-550b-a55b",
     max_iterations: 5,
     quality_threshold: 0.7,
     notification_email: true,
@@ -26,7 +26,7 @@ export default function SettingsPage() {
 
   // MFA State
   const [mfaEnabled, setMfaEnabled] = useState(false);
-  const [mfaFactors, setMfaFactors] = useState<MfaFactor[]>([]);
+  const [mfaFactors, setMfaFactors] = useState<Array<{id: string; friendly_name?: string; factor_type: string; status: string; created_at: string;}>>([]);
   const [mfaSetupStep, setMfaSetupStep] = useState<MfaSetupStep>("idle");
   const [mfaQrCode, setMfaQrCode] = useState("");
   const [mfaSecret, setMfaSecret] = useState("");
@@ -64,160 +64,19 @@ export default function SettingsPage() {
   }, []);
 
   const loadMfaStatus = async () => {
-    try {
-      // Use Supabase client directly for accurate MFA factor listing
-      if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        const { createClient } = await import("@/lib/supabase/client");
-        const supabase = createClient();
-        if (supabase) {
-          const { data } = await supabase.auth.mfa.listFactors();
-          if (data?.totp) {
-            const verified = data.totp.filter((f: { status: string }) => f.status === "verified");
-            setMfaFactors(verified.map((f: { id: string; friendly_name?: string; factor_type: string; status: string; created_at: string; updated_at: string }) => ({
-              id: f.id,
-              friendly_name: f.friendly_name,
-              factor_type: f.factor_type,
-              status: f.status as "verified" | "unverified",
-              created_at: f.created_at,
-              updated_at: f.updated_at,
-            })));
-            setMfaEnabled(verified.length > 0);
-          }
-        }
-      }
-
-      // Also check if MFA is required for this user's role
-      try {
-        const status = await mfaApi.getStatus();
-        setMfaRequired(status.mfa_required);
-      } catch {
-        // Backend may not be connected
-      }
-    } catch {
-      // silent
-    }
+    // MFA disabled in single-user mode
   };
 
   const handleStartEnrollment = async () => {
-    setMfaSetupStep("enrolling");
-    setMfaError("");
-    setMfaLoading(true);
-
-    try {
-      if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        const { createClient } = await import("@/lib/supabase/client");
-        const supabase = createClient();
-        if (!supabase) throw new Error("Auth not configured");
-
-        const { data, error } = await supabase.auth.mfa.enroll({
-          factorType: "totp",
-          friendlyName: "Authenticator App",
-        });
-
-        if (error) throw error;
-        if (!data) throw new Error("No enrollment data returned");
-
-        setMfaFactorId(data.id);
-        setMfaQrCode(data.totp.qr_code);
-        setMfaSecret(data.totp.secret);
-        setMfaSetupStep("scan_qr");
-      }
-    } catch (err) {
-      setMfaError(err instanceof Error ? err.message : "Failed to start enrollment");
-      setMfaSetupStep("idle");
-    } finally {
-      setMfaLoading(false);
-    }
+    setMfaError("MFA is currently disabled.");
   };
 
   const handleVerifyEnrollment = async () => {
-    const code = mfaCode.join("");
-    if (code.length !== 6) {
-      setMfaError("Please enter a complete 6-digit code");
-      return;
-    }
-
-    setMfaLoading(true);
-    setMfaError("");
-
-    try {
-      if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        const { createClient } = await import("@/lib/supabase/client");
-        const supabase = createClient();
-        if (!supabase) throw new Error("Auth not configured");
-
-        // Challenge the factor
-        const { data: challengeData, error: challengeError } = await supabase.auth.mfa.challenge({
-          factorId: mfaFactorId,
-        });
-
-        if (challengeError) throw challengeError;
-        if (!challengeData) throw new Error("Challenge creation failed");
-
-        // Verify with the TOTP code
-        const { error: verifyError } = await supabase.auth.mfa.verify({
-          factorId: mfaFactorId,
-          challengeId: challengeData.id,
-          code,
-        });
-
-        if (verifyError) {
-          setMfaError("Invalid code. Please check your authenticator app and try again.");
-          setMfaCode(["", "", "", "", "", ""]);
-          codeInputRefs.current[0]?.focus();
-          setMfaLoading(false);
-          return;
-        }
-
-        // Success!
-        setMfaSetupStep("success");
-        setMfaEnabled(true);
-        await loadMfaStatus();
-
-        // Auto-dismiss success after 3s
-        setTimeout(() => {
-          setMfaSetupStep("idle");
-          setMfaCode(["", "", "", "", "", ""]);
-          setMfaQrCode("");
-          setMfaSecret("");
-        }, 3000);
-      }
-    } catch (err) {
-      setMfaError(err instanceof Error ? err.message : "Verification failed");
-    } finally {
-      setMfaLoading(false);
-    }
+    // Stub
   };
 
   const handleDisableMfa = async () => {
-    if (!mfaFactors.length) return;
-    
-    setMfaLoading(true);
-    setMfaError("");
-
-    try {
-      if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-        const { createClient } = await import("@/lib/supabase/client");
-        const supabase = createClient();
-        if (!supabase) throw new Error("Auth not configured");
-
-        const { error } = await supabase.auth.mfa.unenroll({
-          factorId: mfaFactors[0].id,
-        });
-
-        if (error) throw error;
-
-        setMfaEnabled(false);
-        setMfaFactors([]);
-        setShowDisableConfirm(false);
-        setDisableCode("");
-        await loadMfaStatus();
-      }
-    } catch (err) {
-      setMfaError(err instanceof Error ? err.message : "Failed to disable MFA");
-    } finally {
-      setMfaLoading(false);
-    }
+    // Stub
   };
 
   // Handle individual code digit input
@@ -302,14 +161,12 @@ export default function SettingsPage() {
   };
 
   const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
-    openai: [
-      { value: "gpt-4o", label: "GPT-4o" },
-      { value: "gpt-4o-mini", label: "GPT-4o Mini" },
-      { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
-    ],
-    anthropic: [
-      { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
-      { value: "claude-3-haiku-20240307", label: "Claude 3 Haiku" },
+    nvidia: [
+      { value: "nvidia/nemotron-3-ultra-550b-a55b", label: "Nemotron Ultra 550B (Primary)" },
+      { value: "meta/llama-3.3-70b-instruct", label: "Llama 3.3 70B (Fast)" },
+      { value: "deepseek-ai/deepseek-v4-flash", label: "DeepSeek V4 Flash (Reasoning)" },
+      { value: "qwen/qwen3-next-80b-a3b-instruct", label: "Qwen3 80B (Compact)" },
+      { value: "nvidia/llama-3.1-nemotron-nano-vl-8b-v1", label: "Nemotron Nano VL 8B (Vision)" },
     ],
   };
 
@@ -667,12 +524,11 @@ export default function SettingsPage() {
                 setSettings({
                   ...settings,
                   llm_provider: e.target.value,
-                  llm_model: MODEL_OPTIONS[e.target.value]?.[0]?.value || "gpt-4o",
+                  llm_model: MODEL_OPTIONS[e.target.value]?.[0]?.value || "nvidia/nemotron-3-ultra-550b-a55b",
                 })
               }
             >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
+              <option value="nvidia">NVIDIA NIM</option>
             </select>
           </div>
           <div className={styles.fieldGroup}>

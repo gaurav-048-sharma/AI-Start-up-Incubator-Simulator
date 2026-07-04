@@ -16,29 +16,9 @@ export default function ReportsPage() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
-  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Initial load
-    const stored = typeof window !== "undefined" ? localStorage.getItem("activeOrgId") : null;
-    setActiveOrgId(stored);
-
-    // Listen for context switching
-    const handleStorage = () => {
-      const current = localStorage.getItem("activeOrgId");
-      setActiveOrgId(current);
-    };
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, []);
 
   useEffect(() => {
     async function load() {
-      if (!activeOrgId && typeof window !== "undefined" && !localStorage.getItem("activeOrgId")) {
-        setLoading(false);
-        return;
-      }
-
       setLoading(true);
       try {
         const ideasData = await ideasApi.list();
@@ -62,7 +42,7 @@ export default function ReportsPage() {
       }
     }
     load();
-  }, [activeOrgId]);
+  }, []);
 
   // Helper to parse basic markdown to HTML for a clean view
   const renderMarkdown = (text: string) => {
@@ -123,7 +103,13 @@ export default function ReportsPage() {
     group.reports.forEach(report => {
       masterMarkdown += `\n\n<div style="page-break-before: always;"></div>\n\n`;
       masterMarkdown += `<h1>${report.title}</h1>\n\n`;
-      masterMarkdown += report.content?.raw || "No content generated.";
+      let textContent = "No content generated.";
+      if (typeof report.content === "string") {
+        textContent = report.content;
+      } else if (report.content && typeof report.content === "object" && 'raw' in report.content) {
+        textContent = report.content.raw as string;
+      }
+      masterMarkdown += textContent;
     });
 
     const printWindow = window.open('', '_blank');
@@ -237,7 +223,11 @@ export default function ReportsPage() {
             <div className={styles.modalBody}>
               <div
                 className={styles.markdownContainer}
-                dangerouslySetInnerHTML={renderMarkdown(String(selectedReport.content?.raw || "No content generated yet."))}
+                dangerouslySetInnerHTML={renderMarkdown(String(
+                  typeof selectedReport.content === "string" 
+                    ? selectedReport.content 
+                    : (selectedReport.content?.raw || "No content generated yet.")
+                ))}
               />
             </div>
           </div>

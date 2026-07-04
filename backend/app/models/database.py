@@ -16,6 +16,16 @@ logger = structlog.get_logger()
 _admin_supabase_client: Optional[Client] = None
 _shared_httpx_client: Optional[httpx.AsyncClient] = None
 
+# In-memory database for demo mode without Supabase
+_mock_db = {
+    "users": {},
+    "ideas": {},
+    "reports": [],
+    "workflow_states": {},
+    "agent_activities": [],
+    "simulations": [],
+}
+
 def get_supabase_client(admin: bool = False) -> Client:
     """
     Get the Supabase client with connection pooling.
@@ -64,14 +74,13 @@ class DatabaseService:
     def _client(self):
         return get_supabase_client()
 
-    # ── Profiles ─────────────────────────────────────────────────
+    # ── Profiles / Users ──────────────────────────────────────────
 
     async def get_profile(self, user_id: str) -> Optional[dict]:
         """Get a user profile by ID."""
         settings = get_settings()
         if not settings.has_supabase:
-            # Demo environment: return a minimal profile
-            return {"id": user_id, "platform_role": "user", "role": "founder", "tier": "free"}
+            return _mock_db["users"].get(user_id)
         try:
             result = await asyncio.to_thread(
                 lambda: self._client.table("profiles").select("*").eq("id", user_id).single().execute()
@@ -86,10 +95,10 @@ class DatabaseService:
         """Update a user profile."""
         settings = get_settings()
         if not settings.has_supabase:
-            # Demo environment: merge and return
-            profile = {"id": user_id, "platform_role": "user", "role": "founder", "tier": "free"}
-            profile.update(data)
-            return profile
+            if user_id not in _mock_db["users"]:
+                _mock_db["users"][user_id] = {"id": user_id}
+            _mock_db["users"][user_id].update(data)
+            return _mock_db["users"][user_id]
         try:
             result = await asyncio.to_thread(
                 lambda: self._client.table("profiles").update(data).eq("id", user_id).execute()
@@ -106,7 +115,8 @@ class DatabaseService:
         """Create a new startup idea."""
         settings = get_settings()
         if not settings.has_supabase:
-            # Demo environment: return the provided idea_data as created
+            # Demo environment: save to memory and return
+            _mock_db["ideas"][idea_data["id"]] = idea_data
             logger.info("Idea created (demo)", idea_id=idea_data.get("id"))
             return idea_data
         try:
@@ -124,7 +134,7 @@ class DatabaseService:
         """Get a startup idea by ID."""
         settings = get_settings()
         if not settings.has_supabase:
-            return None
+            return _mock_db["ideas"].get(idea_id)
         try:
             result = await asyncio.to_thread(
                 lambda: self._client.table("ideas").select("*").eq("id", idea_id).single().execute()
@@ -139,11 +149,14 @@ class DatabaseService:
         """Get all ideas for a user or organization."""
         settings = get_settings()
         if not settings.has_supabase:
-            return []
+            return list(_mock_db["ideas"].values())
         try:
             def _execute_query():
                 query = self._client.table("ideas").select("*")
-                if organization_id:
+                if settings.bypass_auth:
+                    # In bypass mode, return all ideas to avoid "demo-org" hiding real data
+                    pass
+                elif organization_id:
                     query = query.eq("organization_id", organization_id)
                 else:
                     query = query.eq("user_id", user_id)
@@ -160,11 +173,15 @@ class DatabaseService:
         """Get ideas scoped by organization or user."""
         settings = get_settings()
         if not settings.has_supabase:
-            return {"ideas": [], "total": 0}
+            ideas = list(_mock_db["ideas"].values())
+            return {"ideas": ideas, "total": len(ideas)}
         try:
             def _execute_query():
                 query = self._client.table("ideas").select("*")
-                if organization_id:
+                if settings.bypass_auth:
+                    # In bypass mode, return all ideas
+                    pass
+                elif organization_id:
                     query = query.eq("organization_id", organization_id)
                 elif user_id:
                     query = query.eq("user_id", user_id)
@@ -180,6 +197,12 @@ class DatabaseService:
 
     async def update_idea(self, idea_id: str, data: dict) -> Optional[dict]:
         """Update a startup idea."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            if idea_id in _mock_db["ideas"]:
+                _mock_db["ideas"][idea_id].update(data)
+                return _mock_db["ideas"][idea_id]
+            return None
         try:
             result = await asyncio.to_thread(
                 lambda: self._client.table("ideas").update(data).eq("id", idea_id).execute()
@@ -207,8 +230,14 @@ class DatabaseService:
 
     async def log_agent_activity(self, activity_data: dict) -> Optional[dict]:
         """Log an agent activity event."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            _mock_db["agent_activities"].append(activity_data)
+            return activity_data
         try:
-            result = self._client.table("agent_activities").insert(activity_data).execute()
+            result = await asyncio.to_thread(
+                lambda: self._client.table("agent_activities").insert(activity_data).execute()
+            )
             return result.data[0]
         except Exception as e:
             if self._client is not None:
@@ -217,9 +246,12 @@ class DatabaseService:
 
     async def get_idea_activities(self, idea_id: str) -> list[dict]:
         """Get all agent activities for an idea."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            return [a for a in _mock_db["agent_activities"] if a.get("idea_id") == idea_id]
         try:
-            result = (
-                self._client.table("agent_activities")
+            result = await asyncio.to_thread(
+                lambda: self._client.table("agent_activities")
                 .select("*")
                 .eq("idea_id", idea_id)
                 .order("started_at", desc=True)
@@ -228,7 +260,7 @@ class DatabaseService:
             return result.data or []
         except Exception as e:
             if self._client is not None:
-                logger.error("Failed to get activities", idea_id=idea_id, error=str(e))
+                logger.error("Failed to get agent activities", idea_id=idea_id, error=str(e))
             return []
 
     async def update_agent_activity(self, activity_id: str, data: dict) -> Optional[dict]:
@@ -250,6 +282,10 @@ class DatabaseService:
 
     async def save_workflow_state(self, state_data: dict) -> Optional[dict]:
         """Save or update a workflow state."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            _mock_db["workflow_states"][state_data.get("idea_id")] = state_data
+            return state_data
         try:
             result = self._client.table("workflow_states").upsert(state_data).execute()
             return result.data[0] if result.data else None
@@ -280,6 +316,10 @@ class DatabaseService:
 
     async def create_report(self, report_data: dict) -> Optional[dict]:
         """Create a new report."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            _mock_db["reports"].append(report_data)
+            return report_data
         try:
             result = self._client.table("reports").insert(report_data).execute()
             logger.info("Report created", report_id=result.data[0]["id"])
@@ -291,6 +331,9 @@ class DatabaseService:
 
     async def get_idea_reports(self, idea_id: str) -> list[dict]:
         """Get all reports for an idea."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            return [r for r in _mock_db["reports"] if r.get("idea_id") == idea_id]
         try:
             result = (
                 self._client.table("reports")
@@ -319,6 +362,10 @@ class DatabaseService:
 
     async def create_simulation(self, sim_data: dict) -> Optional[dict]:
         """Create a new simulation record."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            _mock_db["simulations"].append(sim_data)
+            return sim_data
         try:
             result = self._client.table("simulations").insert(sim_data).execute()
             logger.info("Simulation created", sim_id=result.data[0]["id"])
@@ -330,6 +377,9 @@ class DatabaseService:
 
     async def get_simulation(self, sim_id: str) -> Optional[dict]:
         """Get a simulation by ID."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            return next((s for s in _mock_db["simulations"] if s.get("id") == sim_id), None)
         try:
             result = self._client.table("simulations").select("*").eq("id", sim_id).single().execute()
             return result.data
@@ -340,6 +390,13 @@ class DatabaseService:
 
     async def update_simulation(self, sim_id: str, data: dict) -> Optional[dict]:
         """Update a simulation record."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            sim = next((s for s in _mock_db["simulations"] if s.get("id") == sim_id), None)
+            if sim:
+                sim.update(data)
+                return sim
+            return None
         try:
             result = self._client.table("simulations").update(data).eq("id", sim_id).execute()
             return result.data[0] if result.data else None
@@ -350,6 +407,9 @@ class DatabaseService:
 
     async def get_idea_simulations(self, idea_id: str) -> list[dict]:
         """Get all simulations for an idea."""
+        settings = get_settings()
+        if not settings.has_supabase:
+            return [s for s in _mock_db["simulations"] if s.get("idea_id") == idea_id]
         try:
             result = (
                 self._client.table("simulations")

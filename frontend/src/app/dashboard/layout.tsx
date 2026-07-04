@@ -9,10 +9,7 @@ import {
   authApi,
   notificationsApi,
   analyticsApi,
-  organizationsApi,
-  setActiveOrg,
   type Notification as AppNotification,
-  type Organization,
 } from "@/lib/api";
 import { useAuth } from "@/components/AuthProvider";
 
@@ -47,63 +44,30 @@ export default function DashboardLayout({
   const [credits, setCredits] = useState<number | null>(null);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
-  const [orgReady, setOrgReady] = useState(false);
   const [platformRole, setPlatformRole] = useState<string>("user");
-
-  useEffect(() => {
-    const storedOrg = typeof window !== "undefined" ? localStorage.getItem("activeOrgId") : null;
-    const storedRole = typeof window !== "undefined" ? localStorage.getItem("platformRole") : "user";
-    
-    if (storedOrg) setActiveOrgId(storedOrg);
-    if (storedRole) setPlatformRole(storedRole);
-  }, []);
-
-  const switchOrganization = (orgId: string) => {
-    setActiveOrg(orgId);
-    setActiveOrgId(orgId);
-    window.location.reload();
-  };
 
   useEffect(() => {
     const loadHeader = () => {
       try {
         // Core identity call
         authApi.me().then(me => {
-          const role = me.platform_role || "user";
+          const role = me.role || "founder";
           setPlatformRole(role);
-          localStorage.setItem("platformRole", role);
         }).catch(() => {});
-
-        // Organizations (needed for layout logic)
-        organizationsApi.list().then(res => {
-          if (res.organizations?.length > 0) {
-            setOrganizations(res.organizations);
-            if (!activeOrgId) {
-              const id = res.organizations[0].id;
-              setActiveOrgId(id);
-              setActiveOrg(id);
-            }
-          }
-          setOrgReady(true);
-        }).catch(() => setOrgReady(true));
 
         // Background data
         analyticsApi.getCredits().then(res => setCredits(res.credits)).catch(() => {});
         notificationsApi.getUnreadCount().then(res => setUnreadCount(res.unread_count)).catch(() => {});
 
       } catch (err) {
-        setOrgReady(true);
-      } finally {
-        setTimeout(() => setOrgReady(true), 800); // Shorter safety throttle
+        // Silent error
       }
     };
     loadHeader();
 
     const interval = setInterval(loadHeader, 30000);
     return () => clearInterval(interval);
-  }, [user, activeOrgId]);
+  }, [user]);
 
   const handleBellClick = async () => {
     setShowNotifDropdown((prev) => !prev);
@@ -148,27 +112,6 @@ export default function DashboardLayout({
           </div>
         </div>
 
-        {(platformRole === "super_admin" || organizations.length > 0) && (
-          <div className={styles.workspaceSelector}>
-            <div className={styles.sidebarSection}>
-              {platformRole === "super_admin" ? "Platform Context" : "Workspace"}
-            </div>
-            <select
-              value={activeOrgId || ""}
-              onChange={(e) => switchOrganization(e.target.value)}
-              className={styles.orgSelect}
-              aria-label="Workspace"
-            >
-              {platformRole === "super_admin" && <option value="">Global Overview</option>}
-              {organizations.map((org) => (
-                <option key={org.id} value={org.id}>
-                  {org.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        )}
-
         <nav className={styles.sidebarNav}>
           <div className={styles.sidebarSection}>Main</div>
           {NAV_ITEMS.map((item) => (
@@ -198,23 +141,6 @@ export default function DashboardLayout({
             </Link>
           ))}
 
-          {platformRole === "super_admin" && (
-            <>
-              <div className={`${styles.sidebarSection} ${styles.adminSection}`}>
-                Admin Control
-              </div>
-              <Link
-                href="/dashboard/admin"
-                className={`${styles.navLink} ${styles.adminLink} ${
-                  pathname === "/dashboard/admin" ? styles.navLinkActive : ""
-                }`}
-              >
-                <span className={styles.navIcon}>👑</span>
-                Admin Panel
-              </Link>
-            </>
-          )}
-
           <div className={styles.sidebarSection}>System</div>
           {NAV_SETTINGS.map((item) => (
             <Link
@@ -234,35 +160,17 @@ export default function DashboardLayout({
           <div className={`${styles.userCard} ${styles.userCardRow}`}>
             <div className={styles.userRow}>
               <div className={styles.userAvatar}>
-                {user?.user_metadata?.avatar_url ? (
-                  <Image
-                    src={user.user_metadata.avatar_url}
-                    alt="Avatar"
-                    width={40}
-                    height={40}
-                    className={styles.userAvatarImg}
-                  />
-                ) : (
-                  "👤"
-                )}
+                👤
               </div>
               <div>
                 <div
                   className={`${styles.userName} ${styles.userNameClamp}`}
                 >
-                  {user?.user_metadata?.full_name || user?.email || "Founder"}
+                  {user?.email || "Founder"}
                 </div>
                 <div className={styles.userRole}>
-                  {platformRole === "super_admin" ? (
-                    <span className={styles.superAdminLabel}>
-                      Platform Admin · {activeOrgId ? (organizations.find(o => o.id === activeOrgId)?.name || 'Viewing Org') : 'Global'}
-                    </span>
-                  ) : (
-                    <>
-                      {organizations.find(o => o.id === activeOrgId)?.my_role?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) || "Member"} · {user?.user_metadata?.tier || "Free"} 
-                      <br /> {credits !== null ? credits : "—"} credits
-                    </>
-                  )}
+                  Founder · Enterprise
+                  <br /> {credits !== null ? credits : "—"} credits
                 </div>
               </div>
             </div>
@@ -279,13 +187,8 @@ export default function DashboardLayout({
 
       {/* Main Content */}
       <main className={styles.mainContent}>
-        {(platformRole !== "super_admin" && !orgReady) ? (
-          <div className="flex items-center justify-center min-h-[60vh]">
-            <div className="animate-spin text-3xl">🚀</div>
-          </div>
-        ) : (
-          <>
-            <header className={styles.header}>
+        <>
+          <header className={styles.header}>
               <div className={styles.headerTitle}>{getPageTitle(pathname)}</div>
               <div className={styles.headerActions}>
                 {/* Notification Bell */}
@@ -339,9 +242,8 @@ export default function DashboardLayout({
               </div>
             </header>
 
-            <div className={styles.pageContent}>{children}</div>
-          </>
-        )}
+          <div className={styles.pageContent}>{children}</div>
+        </>
       </main>
     </div>
   );

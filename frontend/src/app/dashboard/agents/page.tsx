@@ -73,7 +73,7 @@ export default function AgentsPage() {
                   </div>
                   <div className={styles.metric}>
                     <span className={styles.metricLabel}>Provider</span>
-                    <span className={styles.metricValue}>OpenAI</span>
+                    <span className={styles.metricValue}>NVIDIA NIM</span>
                   </div>
                 </div>
               </div>

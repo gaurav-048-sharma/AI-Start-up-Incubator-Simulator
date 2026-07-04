@@ -19,6 +19,8 @@ class IdeaStatus(str, Enum):
     VALIDATING = "validating"
     PLANNING = "planning"
     SIMULATING = "simulating"
+    PROCESSING = "processing"
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -68,11 +70,13 @@ class AgentStatus(str, Enum):
 
 class ReportType(str, Enum):
     MARKET_ANALYSIS = "market_analysis"
+    MARKET_RESEARCH = "market_research"
     TECH_ARCHITECTURE = "tech_architecture"
     GROWTH_STRATEGY = "growth_strategy"
     FINANCIAL_PROJECTION = "financial_projection"
     LEGAL_REVIEW = "legal_review"
     PITCH_DECK = "pitch_deck"
+    PITCH_DECK_CONTENT = "pitch_deck_content"
     EXECUTIVE_SUMMARY = "executive_summary"
     FULL_REPORT = "full_report"
 
@@ -87,6 +91,7 @@ class IdeaCreate(BaseModel):
     target_market: Optional[str] = Field(None, max_length=500, description="Target market description")
     problem_statement: Optional[str] = Field(None, max_length=2000, description="Problem being solved")
     proposed_solution: Optional[str] = Field(None, max_length=2000, description="Proposed solution")
+    department_id: Optional[str] = Field(None, description="Department to scope this idea to")
     metadata: Optional[dict[str, Any]] = Field(default_factory=dict, description="Additional metadata")
 
 
@@ -234,7 +239,7 @@ class ReportResponse(BaseModel):
     idea_id: Union[str, UUID]
     report_type: ReportType
     title: str
-    content: dict[str, Any]
+    content: Any  # Can be dict or string (markdown)
     file_url: Optional[str] = None
     version: int = 1
     created_at: Optional[datetime] = None

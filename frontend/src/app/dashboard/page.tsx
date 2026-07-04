@@ -3,95 +3,48 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import styles from "./dashboard.module.css";
-import { authApi, ideasApi, analyticsApi, getActiveOrgId, organizationsApi, setActiveOrg, type Idea } from "@/lib/api";
+import { authApi, ideasApi, analyticsApi, type Idea } from "@/lib/api";
 
 export default function DashboardPage() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
   const [backendStatus, setBackendStatus] = useState<Record<string, boolean>>({});
   const [credits, setCredits] = useState<number | null>(null);
-  const [orgReady, setOrgReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
-    const checkOrg = async () => {
-      const existing = getActiveOrgId();
-      if (existing) {
-        setOrgReady(true);
-        return;
-      }
-
-      try {
-        const me = await authApi.me();
-        if (!mounted) return;
-
-        if (me.current_org_id) {
-          setActiveOrg(me.current_org_id);
-          setOrgReady(true);
-          return;
-        }
-
-        const orgs = await organizationsApi.list();
-        if (!mounted) return;
-        const firstOrg = orgs.organizations?.[0]?.id;
-        if (firstOrg) {
-          setActiveOrg(firstOrg);
-        }
-      } catch (err) {
-        if (mounted) {
-          setLoadError(err instanceof Error ? err.message : "Unable to initialize organization context.");
-        }
-      } finally {
-        if (mounted) setOrgReady(true);
-      }
-    };
-
-    void checkOrg();
-
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === "activeOrgId") {
-        if (event.newValue) setOrgReady(true);
-      }
-    };
-    window.addEventListener("storage", onStorage);
-    return () => {
-      mounted = false;
-      window.removeEventListener("storage", onStorage);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!orgReady) return;
-    async function load() {
+    const loadData = async () => {
       try {
         setLoadError(null);
-        // Check backend health
-        const health = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001"}/health`
-        ).then((r) => r.json());
-        setBackendStatus(health.services || {});
+        const [ideasData, analyticsData, healthCheck] = await Promise.all([
+          ideasApi.list().catch(() => ({ ideas: [] })),
+          analyticsApi.getCredits().catch(() => ({ credits: null })),
+          fetch(`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001"}/health`).catch(() => null),
+        ]);
 
-        // Load ideas
-        const data = await ideasApi.list();
-        setIdeas(data.ideas || []);
+        if (!mounted) return;
+        setIdeas(ideasData.ideas || []);
+        setCredits(analyticsData.credits);
 
-        // Load credits
-        try {
-          const creditsData = await analyticsApi.getCredits();
-          setCredits(creditsData.credits);
-        } catch { /* skip */ }
-      } catch {
-        // Backend might not be connected to Supabase yet — use empty state
-        setLoadError("Backend data could not be loaded for the current organization context.");
-        setIdeas([]);
+        if (healthCheck) {
+          const healthData = await healthCheck.json();
+          setBackendStatus(healthData.services || {});
+        }
+      } catch (err) {
+        if (mounted) setLoadError(err instanceof Error ? err.message : "Failed to load data");
       } finally {
-        setLoading(false);
+        if (mounted) setLoading(false);
       }
-    }
-    load();
-  }, [orgReady]);
+    };
+
+    loadData();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const totalIdeas = ideas.length;
   const inProgress = ideas.filter((i) =>
@@ -111,9 +64,9 @@ export default function DashboardPage() {
       <div className={styles.statsGrid}>
         {[
           { label: "Total Ideas", value: String(totalIdeas), icon: "💡", accent: "var(--accent-primary)" },
-          { label: "In Progress", value: String(inProgress), icon: "⚡", accent: "var(--warning)" },
+          { label: "In Progress", value: String(inProgress), icon: "⚙️", accent: "var(--warning)" },
           { label: "Completed", value: String(completed), icon: "✅", accent: "var(--success)" },
-          { label: "Credits Left", value: credits !== null ? String(credits) : "—", icon: "🪙", accent: "var(--accent-secondary)" },
+          { label: "Credits Left", value: credits !== null ? String(credits) : "—", icon: "💰", accent: "var(--accent-secondary)" },
         ].map((stat) => (
           <div key={stat.label} className={`${styles.statCard} glass-card`}>
             <div className={styles.statIcon}>{stat.icon}</div>
@@ -128,11 +81,11 @@ export default function DashboardPage() {
       {/* Backend Status */}
       {Object.keys(backendStatus).length > 0 && (
         <div className={`${styles.statusBar} glass-card`}>
-          <span className={styles.statusTitle}>🟢 Backend Connected</span>
+          <span className={styles.statusTitle}>🔌 Backend Connected</span>
           <div className={styles.statusServices}>
             {Object.entries(backendStatus).map(([svc, ok]) => (
               <span key={svc} className={`badge ${ok ? "badge-success" : "badge-error"}`}>
-                {svc}: {ok ? "✓" : "✗"}
+                {svc}: {ok ? "✅" : "❌"}
               </span>
             ))}
           </div>
@@ -166,7 +119,7 @@ export default function DashboardPage() {
       <div className={styles.recentSection}>
         <div className={styles.sectionHeader}>
           <h2 className={styles.sectionTitle}>Recent Ideas</h2>
-          <Link href="/dashboard/ideas" className="btn btn-ghost btn-sm">View All →</Link>
+          <Link href="/dashboard/ideas" className="btn btn-ghost btn-sm">View All ➔</Link>
         </div>
         <div className={`${styles.ideaList} stagger-children`}>
           {loading ? (
@@ -206,10 +159,10 @@ export default function DashboardPage() {
         <h2 className={styles.sectionTitle}>Available AI Agents</h2>
         <div className={`${styles.activityFeed} glass-card`}>
           {[
-            { agent: "🔬 Market Analyst", action: "TAM/SAM/SOM, competitor analysis, trend research", status: "ready" },
+            { agent: "🕵️ Market Analyst", action: "TAM/SAM/SOM, competitor analysis, trend research", status: "ready" },
             { agent: "🏗️ Tech Architect", action: "System design, stack selection, MVP specs", status: "ready" },
-            { agent: "🚀 Growth Strategist", action: "GTM strategy, pricing, acquisition channels", status: "ready" },
-            { agent: "💹 Financial Analyst", action: "Revenue projections, unit economics, funding", status: "ready" },
+            { agent: "📈 Growth Strategist", action: "GTM strategy, pricing, acquisition channels", status: "ready" },
+            { agent: "💰 Financial Analyst", action: "Revenue projections, unit economics, funding", status: "ready" },
             { agent: "⚖️ Legal Advisor", action: "IP landscape, compliance, corporate structure", status: "ready" },
           ].map((activity, i) => (
             <div key={i} className={styles.activityItem}>

@@ -1,10 +1,10 @@
-﻿"""
+"""
 Settings API Routes — user preference management and persistence.
 """
 
 import structlog
 from fastapi import APIRouter, Depends
-from app.middleware.security import get_current_user, HTTPException
+from app.middleware.security import get_current_user
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone
@@ -15,7 +15,7 @@ router = APIRouter()
 
 class UserSettingsUpdate(BaseModel):
     """Request body for updating user settings."""
-    llm_provider: Optional[str] = Field(None, description="openai or anthropic")
+    llm_provider: Optional[str] = Field(None, description="nvidia")
     llm_model: Optional[str] = Field(None, description="LLM model name")
     max_iterations: Optional[int] = Field(None, ge=1, le=15)
     quality_threshold: Optional[float] = Field(None, ge=0, le=1)
@@ -28,8 +28,8 @@ class UserSettingsUpdate(BaseModel):
 class UserSettingsResponse(BaseModel):
     """User settings response."""
     user_id: str
-    llm_provider: str = "openai"
-    llm_model: str = "gpt-4o"
+    llm_provider: str = "nvidia"
+    llm_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     max_iterations: int = 5
     quality_threshold: float = 0.7
     notification_email: bool = True
@@ -72,8 +72,13 @@ async def update_settings(update: UserSettingsUpdate, user: dict = Depends(get_c
 
     # Validate provider/model combinations
     valid_models = {
-        "openai": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
-        "anthropic": ["claude-sonnet-4-20250514", "claude-3-haiku-20240307"],
+        "nvidia": [
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            "meta/llama-3.3-70b-instruct",
+            "deepseek-ai/deepseek-v4-flash",
+            "qwen/qwen3-next-80b-a3b-instruct",
+            "nvidia/llama-3.1-nemotron-nano-vl-8b-v1",
+        ],
     }
 
     update_data = update.model_dump(exclude_none=True)

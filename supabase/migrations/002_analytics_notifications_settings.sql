@@ -38,8 +38,8 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- ── User Settings ───────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS user_settings (
     user_id UUID PRIMARY KEY REFERENCES profiles(id) ON DELETE CASCADE,
-    llm_provider TEXT DEFAULT 'openai',
-    llm_model TEXT DEFAULT 'gpt-4o',
+    llm_provider TEXT DEFAULT 'gemini',
+    llm_model TEXT DEFAULT 'gemini-2.5-flash',
     max_iterations INTEGER DEFAULT 5 CHECK (max_iterations BETWEEN 1 AND 15),
     quality_threshold DECIMAL(3,2) DEFAULT 0.70 CHECK (quality_threshold BETWEEN 0 AND 1),
     notification_email BOOLEAN DEFAULT TRUE,

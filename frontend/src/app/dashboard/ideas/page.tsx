@@ -8,30 +8,9 @@ import { ideasApi, type Idea } from "@/lib/api";
 export default function IdeasPage() {
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeOrgId, setActiveOrgId] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Initial load of org ID from localStorage
-    const stored = typeof window !== "undefined" ? localStorage.getItem("activeOrgId") : null;
-    setActiveOrgId(stored);
-
-    // Listen for changes (e.g. from DashboardLayout sidebar)
-    const handleStorage = () => {
-      const current = localStorage.getItem("activeOrgId");
-      setActiveOrgId(current);
-    };
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, []);
 
   useEffect(() => {
     async function load() {
-      if (!activeOrgId && typeof window !== "undefined" && !localStorage.getItem("activeOrgId")) {
-        // If we really don't have an org yet, show loading or empty
-        setLoading(false);
-        return;
-      }
-      
       setLoading(true);
       try {
         const data = await ideasApi.list();
@@ -43,7 +22,7 @@ export default function IdeasPage() {
       }
     }
     load();
-  }, [activeOrgId]);
+  }, []);
 
   return (
     <div className="animate-fade-in">

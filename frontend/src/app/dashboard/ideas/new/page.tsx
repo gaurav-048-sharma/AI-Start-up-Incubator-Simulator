@@ -71,6 +71,24 @@ export default function NewIdeaPage() {
           <div className={styles.stepContent}>
             <h2 className={styles.stepTitle}>Tell us about your idea</h2>
             <p className={styles.stepDesc}>Start with the basics — our AI agents will do the deep research.</p>
+            
+            <button 
+              className="btn btn-secondary" 
+              style={{ marginBottom: '1rem', fontSize: '0.9rem', padding: '0.5rem 1rem' }}
+              onClick={() => {
+                setForm({
+                  title: "EcoTrack — AI Carbon Footprint Tracker",
+                  description: "EcoTrack is an AI-powered SaaS that helps mid-sized businesses measure, track, and reduce their carbon footprint in real-time.",
+                  industry: "CleanTech",
+                  target_market: "SMBs",
+                  problem_statement: "Climate change is accelerating, but 78% of businesses cannot accurately measure their carbon emissions due to fragmented data and complex supply chains.",
+                  proposed_solution: "EcoTrack uses AI to automate carbon footprint calculation by connecting to 200+ ERP and accounting systems, providing actionable insights for reduction."
+                });
+              }}
+            >
+              🧪 Fill with Dummy Data
+            </button>
+
             <div className={styles.fieldGroup}>
               <label className="input-label" htmlFor="title">Startup Name / Title *</label>
               <input id="title" className="input" placeholder="e.g., AI Resume Builder" value={form.title}

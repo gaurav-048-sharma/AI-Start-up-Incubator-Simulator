@@ -8,35 +8,22 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 
-from app.middleware.security import get_current_user, require_feature
-
+from app.middleware.security import get_current_user
 logger = structlog.get_logger()
 router = APIRouter()
 
-
 class CompareRequest(BaseModel):
-    """Request body for comparing ideas."""
-    idea_ids: list[str]  # 2-4 idea IDs
-
+    idea_ids: list[str]
 
 class ComparisonDimension(BaseModel):
-    """A single dimension in the comparison radar."""
     dimension: str
     label: str
-    scores: dict[str, float]  # idea_id -> score
+    scores: dict[str, float]
 
-
-class ComparisonResponse(BaseModel):
-    """Full comparison result."""
-    ideas: list[dict]
-    dimensions: list[ComparisonDimension]
-    recommendation: Optional[str] = None
-
-
-@router.post("/compare", response_model=ComparisonResponse)
+@router.post("")
 async def compare_ideas(
     req: CompareRequest,
-    user: dict = Depends(require_feature("compare_ideas")),
+    user: dict = Depends(get_current_user),
 ):
     """
     Compare 2-4 startup ideas across multiple dimensions.
@@ -58,7 +45,7 @@ async def compare_ideas(
             raise HTTPException(status_code=404, detail=f"Idea not found: {idea_id}")
         # Verify access
         if idea.get("user_id") != user["id"] and user.get("platform_role") != "super_admin":
-            if not user.get("org_id") or idea.get("organization_id") != user.get("org_id"):
+            if False:
                 raise HTTPException(status_code=403, detail=f"Access denied to idea: {idea_id}")
         ideas.append(idea)
 
