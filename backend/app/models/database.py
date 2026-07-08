@@ -1,68 +1,78 @@
 """
-Supabase database client and helper functions.
+SQLite database client and helper functions using aiosqlite.
 Provides typed access to all database tables with error handling.
 """
 
 import structlog
-import httpx
-import asyncio
-from typing import Optional, Any
-from supabase import create_client, Client
+import aiosqlite
+import json
+import os
+import uuid
+from typing import Optional, Any, List
 
 from app.config import get_settings
 
 logger = structlog.get_logger()
 
-_admin_supabase_client: Optional[Client] = None
-_shared_httpx_client: Optional[httpx.AsyncClient] = None
+def _dict_factory(cursor, row):
+    d = {}
+    for idx, col in enumerate(cursor.description):
+        val = row[idx]
+        # Attempt to parse JSON fields if possible, since we stored JSON as TEXT
+        if isinstance(val, str) and val.startswith('{') and val.endswith('}'):
+            try:
+                val = json.loads(val)
+            except:
+                pass
+        elif isinstance(val, str) and val.startswith('[') and val.endswith(']'):
+            try:
+                val = json.loads(val)
+            except:
+                pass
+        d[col[0]] = val
+    return d
 
-# In-memory database for demo mode without Supabase
-_mock_db = {
-    "users": {},
-    "ideas": {},
-    "reports": [],
-    "workflow_states": {},
-    "agent_activities": [],
-    "simulations": [],
-}
+from contextlib import asynccontextmanager
 
-def get_supabase_client(admin: bool = False) -> Client:
-    """
-    Get the Supabase client with connection pooling.
-    """
-    global _admin_supabase_client
+@asynccontextmanager
+async def get_db_connection():
+    """Get an aiosqlite database connection."""
     settings = get_settings()
+    db_path = settings.sqlite_db_path
     
-    # If Supabase not configured, return None to enable demo/mock mode
-    if not settings.has_supabase:
-        return None
-
-    if admin:
-        if _admin_supabase_client is None:
-            # We use the standard create_client but we can pass a custom session
-            # if we really wanted to, but for now just the singleton is a huge win.
-            _admin_supabase_client = create_client(
-                settings.supabase_url,
-                settings.supabase_service_role_key
-            )
-        return _admin_supabase_client
-
-    # Service role for backend (RBAC gated in middleware)
-    key = settings.supabase_service_role_key
-    
-    from app.middleware.security import current_jwt
-    try:
-        token = current_jwt.get()
-    except LookupError:
-        token = ""
-
-    options = None
-    if token:
-        from supabase.client import ClientOptions
-        options = ClientOptions(headers={"Authorization": f"Bearer {token}"})
+    # Ensure directory exists if path contains one
+    db_dir = os.path.dirname(db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
         
-    return create_client(settings.supabase_url, key, options=options)
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = _dict_factory
+        yield conn
 
+async def init_db():
+    """Initialize the SQLite database with the schema."""
+    settings = get_settings()
+    db_path = settings.sqlite_db_path
+    schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
+    
+    if os.path.exists(schema_path):
+        with open(schema_path, "r") as f:
+            schema_sql = f.read()
+        
+        async with get_db_connection() as conn:
+            await conn.executescript(schema_sql)
+            await conn.commit()
+            logger.info("Database schema initialized", db_path=db_path)
+
+def _serialize_json(data: dict) -> dict:
+    """Helper to convert dicts to JSON strings for SQLite insertion."""
+    res = {}
+    for k, v in data.items():
+        if isinstance(v, (dict, list)):
+            res[k] = json.dumps(v)
+        else:
+            res[k] = v
+    return res
 
 class DatabaseService:
     """High-level database operations for the incubator platform."""
@@ -70,363 +80,368 @@ class DatabaseService:
     def __init__(self):
         pass
 
-    @property
-    def _client(self):
-        return get_supabase_client()
-
     # ── Profiles / Users ──────────────────────────────────────────
 
     async def get_profile(self, user_id: str) -> Optional[dict]:
-        """Get a user profile by ID."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            return _mock_db["users"].get(user_id)
         try:
-            result = await asyncio.to_thread(
-                lambda: self._client.table("profiles").select("*").eq("id", user_id).single().execute()
-            )
-            return result.data
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM profiles WHERE id = ?", (user_id,)) as cursor:
+                    return await cursor.fetchone()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to get profile", user_id=user_id, error=str(e))
+            logger.error("Failed to get profile", user_id=user_id, error=str(e))
+            return None
+
+    async def get_profile_by_email(self, email: str) -> Optional[dict]:
+        try:
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM profiles WHERE email = ?", (email,)) as cursor:
+                    return await cursor.fetchone()
+        except Exception as e:
+            logger.error("Failed to get profile by email", email=email, error=str(e))
             return None
 
     async def update_profile(self, user_id: str, data: dict) -> Optional[dict]:
-        """Update a user profile."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            if user_id not in _mock_db["users"]:
-                _mock_db["users"][user_id] = {"id": user_id}
-            _mock_db["users"][user_id].update(data)
-            return _mock_db["users"][user_id]
         try:
-            result = await asyncio.to_thread(
-                lambda: self._client.table("profiles").update(data).eq("id", user_id).execute()
-            )
-            return result.data[0] if result.data else None
+            data = _serialize_json(data)
+            if not data:
+                return await self.get_profile(user_id)
+                
+            set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
+            values = list(data.values()) + [user_id]
+            
+            async with get_db_connection() as conn:
+                # Check if exists
+                async with conn.execute("SELECT 1 FROM profiles WHERE id = ?", (user_id,)) as cursor:
+                    exists = await cursor.fetchone()
+                
+                if exists:
+                    await conn.execute(f"UPDATE profiles SET {set_clause} WHERE id = ?", values)
+                else:
+                    cols = ", ".join(data.keys())
+                    placeholders = ", ".join(["?"] * len(data))
+                    await conn.execute(f"INSERT INTO profiles (id, {cols}) VALUES (?, {placeholders})", [user_id] + list(data.values()))
+                await conn.commit()
+                
+            return await self.get_profile(user_id)
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to update profile", user_id=user_id, error=str(e))
+            logger.error("Failed to update profile", user_id=user_id, error=str(e))
             return None
 
     # ── Ideas ────────────────────────────────────────────────────
 
     async def create_idea(self, idea_data: dict) -> Optional[dict]:
-        """Create a new startup idea."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            # Demo environment: save to memory and return
-            _mock_db["ideas"][idea_data["id"]] = idea_data
-            logger.info("Idea created (demo)", idea_id=idea_data.get("id"))
-            return idea_data
         try:
-            result = await asyncio.to_thread(
-                lambda: self._client.table("ideas").insert(idea_data).execute()
-            )
-            logger.info("Idea created", idea_id=result.data[0]["id"])
-            return result.data[0]
+            if "id" not in idea_data:
+                idea_data["id"] = str(uuid.uuid4())
+            data = _serialize_json(idea_data)
+            cols = ", ".join(data.keys())
+            placeholders = ", ".join(["?"] * len(data))
+            
+            async with get_db_connection() as conn:
+                await conn.execute(f"INSERT INTO ideas ({cols}) VALUES ({placeholders})", list(data.values()))
+                await conn.commit()
+                
+            logger.info("Idea created", idea_id=idea_data["id"])
+            return await self.get_idea(idea_data["id"])
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to create idea", error=str(e))
+            logger.error("Failed to create idea", error=str(e))
             return None
 
     async def get_idea(self, idea_id: str) -> Optional[dict]:
-        """Get a startup idea by ID."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            return _mock_db["ideas"].get(idea_id)
         try:
-            result = await asyncio.to_thread(
-                lambda: self._client.table("ideas").select("*").eq("id", idea_id).single().execute()
-            )
-            return result.data
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM ideas WHERE id = ?", (idea_id,)) as cursor:
+                    return await cursor.fetchone()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to get idea", idea_id=idea_id, error=str(e))
+            logger.error("Failed to get idea", idea_id=idea_id, error=str(e))
             return None
 
     async def get_user_ideas(self, user_id: str, organization_id: Optional[str] = None) -> list[dict]:
-        """Get all ideas for a user or organization."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            return list(_mock_db["ideas"].values())
         try:
-            def _execute_query():
-                query = self._client.table("ideas").select("*")
+            settings = get_settings()
+            async with get_db_connection() as conn:
                 if settings.bypass_auth:
-                    # In bypass mode, return all ideas to avoid "demo-org" hiding real data
-                    pass
+                    query = "SELECT * FROM ideas ORDER BY created_at DESC"
+                    params = ()
                 elif organization_id:
-                    query = query.eq("organization_id", organization_id)
+                    query = "SELECT * FROM ideas WHERE organization_id = ? ORDER BY created_at DESC"
+                    params = (organization_id,)
                 else:
-                    query = query.eq("user_id", user_id)
-                return query.order("created_at", desc=True).execute()
-
-            result = await asyncio.to_thread(_execute_query)
-            return result.data or []
+                    query = "SELECT * FROM ideas WHERE user_id = ? ORDER BY created_at DESC"
+                    params = (user_id,)
+                    
+                async with conn.execute(query, params) as cursor:
+                    return await cursor.fetchall()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to get ideas", user_id=user_id, org_id=organization_id, error=str(e))
+            logger.error("Failed to get ideas", user_id=user_id, org_id=organization_id, error=str(e))
             return []
 
     async def get_ideas(self, organization_id: Optional[str] = None, user_id: Optional[str] = None) -> dict:
-        """Get ideas scoped by organization or user."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            ideas = list(_mock_db["ideas"].values())
-            return {"ideas": ideas, "total": len(ideas)}
         try:
-            def _execute_query():
-                query = self._client.table("ideas").select("*")
+            settings = get_settings()
+            async with get_db_connection() as conn:
                 if settings.bypass_auth:
-                    # In bypass mode, return all ideas
-                    pass
+                    query = "SELECT * FROM ideas ORDER BY created_at DESC"
+                    params = ()
                 elif organization_id:
-                    query = query.eq("organization_id", organization_id)
+                    query = "SELECT * FROM ideas WHERE organization_id = ? ORDER BY created_at DESC"
+                    params = (organization_id,)
                 elif user_id:
-                    query = query.eq("user_id", user_id)
-                return query.order("created_at", desc=True).execute()
-
-            result = await asyncio.to_thread(_execute_query)
-            ideas = result.data or []
-            return {"ideas": ideas, "total": len(ideas)}
+                    query = "SELECT * FROM ideas WHERE user_id = ? ORDER BY created_at DESC"
+                    params = (user_id,)
+                else:
+                    query = "SELECT * FROM ideas ORDER BY created_at DESC"
+                    params = ()
+                    
+                async with conn.execute(query, params) as cursor:
+                    ideas = await cursor.fetchall()
+                    return {"ideas": ideas, "total": len(ideas)}
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to list ideas", user_id=user_id, org_id=organization_id, error=str(e))
+            logger.error("Failed to list ideas", user_id=user_id, org_id=organization_id, error=str(e))
             return {"ideas": [], "total": 0}
 
     async def update_idea(self, idea_id: str, data: dict) -> Optional[dict]:
-        """Update a startup idea."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            if idea_id in _mock_db["ideas"]:
-                _mock_db["ideas"][idea_id].update(data)
-                return _mock_db["ideas"][idea_id]
-            return None
         try:
-            result = await asyncio.to_thread(
-                lambda: self._client.table("ideas").update(data).eq("id", idea_id).execute()
-            )
-            return result.data[0] if result.data else None
+            data = _serialize_json(data)
+            if not data:
+                return await self.get_idea(idea_id)
+                
+            set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
+            values = list(data.values()) + [idea_id]
+            
+            async with get_db_connection() as conn:
+                await conn.execute(f"UPDATE ideas SET {set_clause} WHERE id = ?", values)
+                await conn.commit()
+                
+            return await self.get_idea(idea_id)
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to update idea", idea_id=idea_id, error=str(e))
+            logger.error("Failed to update idea", idea_id=idea_id, error=str(e))
             return None
 
-    async def delete_idea(self, idea_id: str) -> bool:
-        """Delete a startup idea."""
+    async def clear_idea_artifacts(self, idea_id: str) -> bool:
         try:
-            await asyncio.to_thread(
-                lambda: self._client.table("ideas").delete().eq("id", idea_id).execute()
-            )
+            async with get_db_connection() as conn:
+                await conn.execute("DELETE FROM agent_activities WHERE idea_id = ?", (idea_id,))
+                await conn.execute("DELETE FROM workflow_states WHERE idea_id = ?", (idea_id,))
+                await conn.execute("DELETE FROM reports WHERE idea_id = ?", (idea_id,))
+                await conn.execute("DELETE FROM simulations WHERE idea_id = ?", (idea_id,))
+                await conn.commit()
+            return True
+        except Exception as e:
+            logger.error("Failed to clear idea artifacts", idea_id=idea_id, error=str(e))
+            return False
+
+    async def delete_idea(self, idea_id: str) -> bool:
+        try:
+            await self.clear_idea_artifacts(idea_id)
+            async with get_db_connection() as conn:
+                await conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
+                await conn.commit()
             logger.info("Idea deleted", idea_id=idea_id)
             return True
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to delete idea", idea_id=idea_id, error=str(e))
+            logger.error("Failed to delete idea", idea_id=idea_id, error=str(e))
             return False
 
     # ── Agent Activities ─────────────────────────────────────────
 
     async def log_agent_activity(self, activity_data: dict) -> Optional[dict]:
-        """Log an agent activity event."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            _mock_db["agent_activities"].append(activity_data)
-            return activity_data
         try:
-            result = await asyncio.to_thread(
-                lambda: self._client.table("agent_activities").insert(activity_data).execute()
-            )
-            return result.data[0]
+            if "id" not in activity_data:
+                activity_data["id"] = str(uuid.uuid4())
+            data = _serialize_json(activity_data)
+            cols = ", ".join(data.keys())
+            placeholders = ", ".join(["?"] * len(data))
+            
+            async with get_db_connection() as conn:
+                await conn.execute(f"INSERT INTO agent_activities ({cols}) VALUES ({placeholders})", list(data.values()))
+                await conn.commit()
+                
+            # Fetch back
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM agent_activities WHERE id = ?", (activity_data["id"],)) as cursor:
+                    return await cursor.fetchone()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to log agent activity", error=str(e))
+            logger.error("Failed to log agent activity", error=str(e))
             return None
 
     async def get_idea_activities(self, idea_id: str) -> list[dict]:
-        """Get all agent activities for an idea."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            return [a for a in _mock_db["agent_activities"] if a.get("idea_id") == idea_id]
         try:
-            result = await asyncio.to_thread(
-                lambda: self._client.table("agent_activities")
-                .select("*")
-                .eq("idea_id", idea_id)
-                .order("started_at", desc=True)
-                .execute()
-            )
-            return result.data or []
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM agent_activities WHERE idea_id = ? ORDER BY started_at DESC", (idea_id,)) as cursor:
+                    return await cursor.fetchall()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to get agent activities", idea_id=idea_id, error=str(e))
+            logger.error("Failed to get agent activities", idea_id=idea_id, error=str(e))
             return []
 
     async def update_agent_activity(self, activity_id: str, data: dict) -> Optional[dict]:
-        """Update an agent activity record."""
         try:
-            result = (
-                self._client.table("agent_activities")
-                .update(data)
-                .eq("id", activity_id)
-                .execute()
-            )
-            return result.data[0] if result.data else None
+            data = _serialize_json(data)
+            if not data:
+                pass
+            else:
+                set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
+                values = list(data.values()) + [activity_id]
+                
+                async with get_db_connection() as conn:
+                    await conn.execute(f"UPDATE agent_activities SET {set_clause} WHERE id = ?", values)
+                    await conn.commit()
+                    
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM agent_activities WHERE id = ?", (activity_id,)) as cursor:
+                    return await cursor.fetchone()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to update activity", activity_id=activity_id, error=str(e))
+            logger.error("Failed to update activity", activity_id=activity_id, error=str(e))
             return None
 
     # ── Workflow States ──────────────────────────────────────────
 
     async def save_workflow_state(self, state_data: dict) -> Optional[dict]:
-        """Save or update a workflow state."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            _mock_db["workflow_states"][state_data.get("idea_id")] = state_data
-            return state_data
         try:
-            result = self._client.table("workflow_states").upsert(state_data).execute()
-            return result.data[0] if result.data else None
+            idea_id = state_data.get("idea_id")
+            if not idea_id:
+                return None
+                
+            if "id" not in state_data:
+                state_data["id"] = str(uuid.uuid4())
+                
+            data = _serialize_json(state_data)
+            
+            async with get_db_connection() as conn:
+                # Check if exists
+                async with conn.execute("SELECT 1 FROM workflow_states WHERE idea_id = ?", (idea_id,)) as cursor:
+                    exists = await cursor.fetchone()
+                
+                if exists:
+                    set_clause = ", ".join([f"{k} = ?" for k in data.keys() if k != "id"])
+                    values = [v for k, v in data.items() if k != "id"] + [idea_id]
+                    await conn.execute(f"UPDATE workflow_states SET {set_clause} WHERE idea_id = ?", values)
+                else:
+                    cols = ", ".join(data.keys())
+                    placeholders = ", ".join(["?"] * len(data))
+                    await conn.execute(f"INSERT INTO workflow_states ({cols}) VALUES ({placeholders})", list(data.values()))
+                await conn.commit()
+                
+            return await self.get_workflow_state(idea_id)
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to save workflow state", error=str(e))
+            logger.error("Failed to save workflow state", error=str(e))
             return None
 
     async def get_workflow_state(self, idea_id: str) -> Optional[dict]:
-        """Get the latest workflow state for an idea."""
         try:
-            result = (
-                self._client.table("workflow_states")
-                .select("*")
-                .eq("idea_id", idea_id)
-                .order("updated_at", desc=True)
-                .limit(1)
-                .single()
-                .execute()
-            )
-            return result.data
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM workflow_states WHERE idea_id = ? ORDER BY updated_at DESC LIMIT 1", (idea_id,)) as cursor:
+                    return await cursor.fetchone()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to get workflow state", idea_id=idea_id, error=str(e))
+            logger.error("Failed to get workflow state", idea_id=idea_id, error=str(e))
             return None
 
     # ── Reports ──────────────────────────────────────────────────
 
     async def create_report(self, report_data: dict) -> Optional[dict]:
-        """Create a new report."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            _mock_db["reports"].append(report_data)
-            return report_data
         try:
-            result = self._client.table("reports").insert(report_data).execute()
-            logger.info("Report created", report_id=result.data[0]["id"])
-            return result.data[0]
+            if "id" not in report_data:
+                report_data["id"] = str(uuid.uuid4())
+            data = _serialize_json(report_data)
+            cols = ", ".join(data.keys())
+            placeholders = ", ".join(["?"] * len(data))
+            
+            async with get_db_connection() as conn:
+                await conn.execute(f"INSERT INTO reports ({cols}) VALUES ({placeholders})", list(data.values()))
+                await conn.commit()
+                
+            logger.info("Report created", report_id=report_data["id"])
+            return await self.get_report(report_data["id"])
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to create report", error=str(e))
+            logger.error("Failed to create report", error=str(e))
             return None
 
     async def get_idea_reports(self, idea_id: str) -> list[dict]:
-        """Get all reports for an idea."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            return [r for r in _mock_db["reports"] if r.get("idea_id") == idea_id]
         try:
-            result = (
-                self._client.table("reports")
-                .select("*")
-                .eq("idea_id", idea_id)
-                .order("created_at", desc=True)
-                .execute()
-            )
-            return result.data or []
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM reports WHERE idea_id = ? ORDER BY created_at DESC", (idea_id,)) as cursor:
+                    return await cursor.fetchall()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to get reports", idea_id=idea_id, error=str(e))
+            logger.error("Failed to get reports", idea_id=idea_id, error=str(e))
             return []
 
     async def get_report(self, report_id: str) -> Optional[dict]:
-        """Get a specific report."""
         try:
-            result = self._client.table("reports").select("*").eq("id", report_id).single().execute()
-            return result.data
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM reports WHERE id = ?", (report_id,)) as cursor:
+                    return await cursor.fetchone()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to get report", report_id=report_id, error=str(e))
+            logger.error("Failed to get report", report_id=report_id, error=str(e))
             return None
 
     # ── Simulations ──────────────────────────────────────────────
 
     async def create_simulation(self, sim_data: dict) -> Optional[dict]:
-        """Create a new simulation record."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            _mock_db["simulations"].append(sim_data)
-            return sim_data
         try:
-            result = self._client.table("simulations").insert(sim_data).execute()
-            logger.info("Simulation created", sim_id=result.data[0]["id"])
-            return result.data[0]
+            if "id" not in sim_data:
+                sim_data["id"] = str(uuid.uuid4())
+            data = _serialize_json(sim_data)
+            cols = ", ".join(data.keys())
+            placeholders = ", ".join(["?"] * len(data))
+            
+            async with get_db_connection() as conn:
+                await conn.execute(f"INSERT INTO simulations ({cols}) VALUES ({placeholders})", list(data.values()))
+                await conn.commit()
+                
+            logger.info("Simulation created", sim_id=sim_data["id"])
+            return await self.get_simulation(sim_data["id"])
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to create simulation", error=str(e))
+            logger.error("Failed to create simulation", error=str(e))
             return None
 
     async def get_simulation(self, sim_id: str) -> Optional[dict]:
-        """Get a simulation by ID."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            return next((s for s in _mock_db["simulations"] if s.get("id") == sim_id), None)
         try:
-            result = self._client.table("simulations").select("*").eq("id", sim_id).single().execute()
-            return result.data
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM simulations WHERE id = ?", (sim_id,)) as cursor:
+                    return await cursor.fetchone()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to get simulation", sim_id=sim_id, error=str(e))
+            logger.error("Failed to get simulation", sim_id=sim_id, error=str(e))
             return None
 
     async def update_simulation(self, sim_id: str, data: dict) -> Optional[dict]:
-        """Update a simulation record."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            sim = next((s for s in _mock_db["simulations"] if s.get("id") == sim_id), None)
-            if sim:
-                sim.update(data)
-                return sim
-            return None
         try:
-            result = self._client.table("simulations").update(data).eq("id", sim_id).execute()
-            return result.data[0] if result.data else None
+            data = _serialize_json(data)
+            if not data:
+                return await self.get_simulation(sim_id)
+                
+            set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
+            values = list(data.values()) + [sim_id]
+            
+            async with get_db_connection() as conn:
+                await conn.execute(f"UPDATE simulations SET {set_clause} WHERE id = ?", values)
+                await conn.commit()
+                
+            return await self.get_simulation(sim_id)
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to update simulation", sim_id=sim_id, error=str(e))
+            logger.error("Failed to update simulation", sim_id=sim_id, error=str(e))
             return None
 
     async def get_idea_simulations(self, idea_id: str) -> list[dict]:
-        """Get all simulations for an idea."""
-        settings = get_settings()
-        if not settings.has_supabase:
-            return [s for s in _mock_db["simulations"] if s.get("idea_id") == idea_id]
         try:
-            result = (
-                self._client.table("simulations")
-                .select("*")
-                .eq("idea_id", idea_id)
-                .order("started_at", desc=True)
-                .execute()
-            )
-            return result.data or []
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT * FROM simulations WHERE idea_id = ? ORDER BY created_at DESC", (idea_id,)) as cursor:
+                    return await cursor.fetchall()
         except Exception as e:
-            if self._client is not None:
-                logger.error("Failed to get simulations", idea_id=idea_id, error=str(e))
+            logger.error("Failed to list simulations", idea_id=idea_id, error=str(e))
             return []
+
+    async def delete_simulation(self, sim_id: str) -> bool:
+        try:
+            async with get_db_connection() as conn:
+                await conn.execute("DELETE FROM simulations WHERE id = ?", (sim_id,))
+                await conn.commit()
+            return True
+        except Exception as e:
+            logger.error("Failed to delete simulation", sim_id=sim_id, error=str(e))
+            return False
 
 
 _db_service: Optional[DatabaseService] = None
-
 
 def get_db_service() -> DatabaseService:
     """Get or create the global database service singleton."""

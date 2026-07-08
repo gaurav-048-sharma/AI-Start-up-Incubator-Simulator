@@ -169,34 +169,8 @@ async def provision_enterprise_request(
 ):
     """
     Provision an enterprise org immediately from a paid enterprise_request.
-    Super admin only. This calls a server-side RPC that validates approval and creates the org.
     """
-    from app.models.database import get_supabase_client
-    admin_client = get_supabase_client(admin=True)
-    try:
-        # Call RPC - must use admin client since execute privileges are revoked from PUBLIC
-        res = admin_client.rpc("create_organization_from_request", {"req_id": request_id, "approver_id": user["id"]}).execute()
-        # Supabase returns result in res.data for RPC calls
-        new_org_id = None
-        if hasattr(res, 'data') and res.data:
-            # Could be a list or scalar
-            if isinstance(res.data, list):
-                new_org_id = res.data[0]
-            else:
-                new_org_id = res.data
-
-        await log_audit_event(
-            user_id=user["id"],
-            action="provision_enterprise_request",
-            resource_type="enterprise_request",
-            resource_id=request_id,
-            details={"new_org_id": new_org_id},
-            request=request,
-        )
-        return {"status": "success", "org_id": new_org_id}
-    except Exception as e:
-        logger.error("Failed to provision enterprise org", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to provision enterprise org")
+    raise HTTPException(status_code=501, detail="Enterprise provisioning not implemented for SQLite")
 
 
 @router.post("/reject/{request_id}")
@@ -235,8 +209,7 @@ async def list_all_organizations(
     _role: dict = Depends(require_platform_role("support")),
 ):
     """List all organizations globally. Platform support+ role required."""
-    from app.models.database import get_supabase_client
-    admin_client = get_supabase_client(admin=True)
+    admin_client = None
     try:
         result = (
             admin_client.table("organizations")
@@ -273,8 +246,7 @@ async def delete_organization(
     _role: dict = Depends(require_platform_role("super_admin")),
 ):
     """Delete an organization globally. Super admin only."""
-    from app.models.database import get_supabase_client
-    admin_client = get_supabase_client(admin=True)
+    admin_client = None
     try:
         # Cascade cleanup: remove members, invitations, and orphaned data
         admin_client.table("organization_members").delete().eq("organization_id", org_id).execute()
@@ -309,8 +281,7 @@ async def update_organization_status(
     _role: dict = Depends(require_platform_role("super_admin")),
 ):
     """Suspend or reactivate an organization. Super admin only."""
-    from app.models.database import get_supabase_client
-    admin_client = get_supabase_client(admin=True)
+    admin_client = None
     try:
         admin_client.table("organizations").update({"status": payload.status}).eq("id", org_id).execute()
 
@@ -343,8 +314,7 @@ async def list_platform_users(
     limit: int = 100,
 ):
     """List all platform users. Support+ role required."""
-    from app.models.database import get_supabase_client
-    admin_client = get_supabase_client(admin=True)
+    admin_client = None
     try:
         result = (
             admin_client.table("profiles")
@@ -372,8 +342,7 @@ async def update_user_platform_role(
     _role: dict = Depends(require_platform_role("super_admin")),
 ):
     """Update a user's platform role. Super admin only."""
-    from app.models.database import get_supabase_client
-    admin_client = get_supabase_client(admin=True)
+    admin_client = None
 
     # Prevent self-demotion
     if user_id == user["id"] and payload.platform_role != "super_admin":

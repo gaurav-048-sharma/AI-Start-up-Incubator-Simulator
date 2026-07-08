@@ -1,24 +1,21 @@
 """
-Supabase storage service for managing file uploads (reports, pitch decks, etc.).
+Local storage service for managing file uploads (reports, pitch decks, etc.).
 """
 
+import os
 import structlog
 from typing import Optional
-
-from app.models.database import get_supabase_client
+from app.config import get_settings
 
 logger = structlog.get_logger()
 
-REPORTS_BUCKET = "reports"
-PITCH_DECKS_BUCKET = "pitch-decks"
-ASSETS_BUCKET = "assets"
-
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "uploads")
 
 class StorageService:
-    """Manages file uploads/downloads to Supabase Storage."""
+    """Manages file uploads/downloads locally."""
 
     def __init__(self):
-        self._client = get_supabase_client()
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
 
     async def upload_report(
         self,
@@ -27,15 +24,15 @@ class StorageService:
         content: bytes,
         content_type: str = "application/pdf",
     ) -> Optional[str]:
-        """Upload a report file and return the public URL."""
         try:
-            path = f"{idea_id}/{filename}"
-            self._client.storage.from_(REPORTS_BUCKET).upload(
-                path=path,
-                file=content,
-                file_options={"content-type": content_type, "upsert": "true"},
-            )
-            url = self._client.storage.from_(REPORTS_BUCKET).get_public_url(path)
+            idea_dir = os.path.join(UPLOAD_DIR, idea_id)
+            os.makedirs(idea_dir, exist_ok=True)
+            path = os.path.join(idea_dir, filename)
+            with open(path, "wb") as f:
+                f.write(content)
+            
+            settings = get_settings()
+            url = f"http://{settings.api_host}:{settings.api_port}/static/{idea_id}/{filename}"
             logger.info("Report uploaded", idea_id=idea_id, filename=filename)
             return url
         except Exception as e:
@@ -48,15 +45,15 @@ class StorageService:
         filename: str,
         content: bytes,
     ) -> Optional[str]:
-        """Upload a pitch deck file and return the public URL."""
         try:
-            path = f"{idea_id}/{filename}"
-            self._client.storage.from_(PITCH_DECKS_BUCKET).upload(
-                path=path,
-                file=content,
-                file_options={"content-type": "application/pdf", "upsert": "true"},
-            )
-            url = self._client.storage.from_(PITCH_DECKS_BUCKET).get_public_url(path)
+            idea_dir = os.path.join(UPLOAD_DIR, idea_id)
+            os.makedirs(idea_dir, exist_ok=True)
+            path = os.path.join(idea_dir, filename)
+            with open(path, "wb") as f:
+                f.write(content)
+            
+            settings = get_settings()
+            url = f"http://{settings.api_host}:{settings.api_port}/static/{idea_id}/{filename}"
             logger.info("Pitch deck uploaded", idea_id=idea_id, filename=filename)
             return url
         except Exception as e:
@@ -64,18 +61,14 @@ class StorageService:
             return None
 
     async def get_file_url(self, bucket: str, path: str) -> Optional[str]:
-        """Get the public URL for a file in storage."""
-        try:
-            return self._client.storage.from_(bucket).get_public_url(path)
-        except Exception as e:
-            logger.error("Failed to get file URL", error=str(e))
-            return None
+        settings = get_settings()
+        return f"http://{settings.api_host}:{settings.api_port}/static/{path}"
 
     async def delete_file(self, bucket: str, path: str) -> bool:
-        """Delete a file from storage."""
         try:
-            self._client.storage.from_(bucket).remove([path])
-            logger.info("File deleted", bucket=bucket, path=path)
+            full_path = os.path.join(UPLOAD_DIR, path)
+            if os.path.exists(full_path):
+                os.remove(full_path)
             return True
         except Exception as e:
             logger.error("Failed to delete file", error=str(e))
@@ -84,9 +77,7 @@ class StorageService:
 
 _storage_service: Optional[StorageService] = None
 
-
 def get_storage_service() -> StorageService:
-    """Get or create the global storage service singleton."""
     global _storage_service
     if _storage_service is None:
         _storage_service = StorageService()

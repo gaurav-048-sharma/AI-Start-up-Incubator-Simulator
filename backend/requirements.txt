@@ -17,7 +17,7 @@ langchain-openai
 openai>=1.0.0
 
 # Database & Storage
-supabase>=2.10.0
+aiosqlite>=0.20.0
 
 # Search & Tools
 tavily-python>=0.5.0
@@ -31,3 +31,7 @@ tenacity>=9.0.0
 structlog>=25.0.0
 orjson>=3.10.0
 python-multipart>=0.0.18
+
+# Auth
+passlib>=1.7.4
+bcrypt>=4.0.0

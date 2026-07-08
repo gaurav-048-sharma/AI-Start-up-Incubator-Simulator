@@ -20,7 +20,12 @@ class ComparisonDimension(BaseModel):
     label: str
     scores: dict[str, float]
 
-@router.post("")
+class ComparisonResponse(BaseModel):
+    ideas: list[dict]
+    dimensions: list[ComparisonDimension]
+    recommendation: str
+
+@router.post("/compare")
 async def compare_ideas(
     req: CompareRequest,
     user: dict = Depends(get_current_user),
@@ -145,15 +150,33 @@ def _generate_recommendation(ideas: list[dict], dimensions: list[ComparisonDimen
     best_score = composite[best_id]
     weakest_dim = min(dimensions, key=lambda d: d.scores.get(best_id, 0))
 
-    recommendation = (
-        f'"{best_idea["title"]}" leads with a composite score of {best_score:.0%}. '
-        f'Its weakest area is {weakest_dim.label} ({weakest_dim.scores.get(best_id, 0):.0%}). '
-    )
+    strongest_dim = max(dimensions, key=lambda d: d.scores.get(best_id, 0))
+
+    html = f"""
+    <div style="font-size: var(--fs-md); line-height: 1.6;">
+        <p style="margin-bottom: var(--space-3);">Based on our multi-dimensional analysis, <strong>{best_idea['title']}</strong> emerges as the leading concept with a composite score of <strong style="color: var(--accent); font-size: var(--fs-lg);">{best_score:.0%}</strong>.</p>
+        
+        <div style="display: flex; gap: var(--space-4); margin: var(--space-4) 0; padding: var(--space-3); background: var(--bg-secondary); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+            <div style="flex: 1;">
+                <div style="font-size: var(--fs-xs); color: var(--text-muted); text-transform: uppercase;">Biggest Strength</div>
+                <div style="color: var(--success); font-weight: 600;">{strongest_dim.label} ({strongest_dim.scores.get(best_id, 0):.0%})</div>
+            </div>
+            <div style="flex: 1;">
+                <div style="font-size: var(--fs-xs); color: var(--text-muted); text-transform: uppercase;">Area for Improvement</div>
+                <div style="color: var(--warning); font-weight: 600;">{weakest_dim.label} ({weakest_dim.scores.get(best_id, 0):.0%})</div>
+            </div>
+        </div>
+    """
 
     scores_sorted = sorted(composite.values(), reverse=True)
     if len(scores_sorted) >= 2 and (scores_sorted[0] - scores_sorted[1]) < 0.1:
         runner_up_id = sorted(composite, key=lambda k: composite[k], reverse=True)[1]
         runner_up = next(i for i in ideas if i["id"] == runner_up_id)
-        recommendation += f'However, "{runner_up["title"]}" is very close — consider the specific dimensions that matter most to your goals.'
-
-    return recommendation
+        html += f"""
+        <div style="padding-left: var(--space-3); border-left: 2px solid var(--accent-tertiary);">
+            <span style="font-weight: 600; color: var(--text-primary);">Close Contender:</span> <em>{runner_up['title']}</em> is extremely close ({(scores_sorted[1]):.0%}). Depending on your risk appetite and core competencies, this could still be the winning pivot.
+        </div>
+        """
+        
+    html += "</div>"
+    return html

@@ -58,10 +58,8 @@ class Settings(BaseSettings):
     jwt_secret_key: str = Field(default="fallback-secret-key-change-in-prod", description="Secret key for JWTs")
     jwt_expiry_hours: int = Field(default=24, description="JWT expiry in hours")
 
-    # ── Supabase (Kept for compatibility with other env vars if any) ──
-    supabase_url: str = Field(default="", description="Supabase project URL")
-    supabase_anon_key: str = Field(default="", description="Supabase anon/public key")
-    supabase_service_role_key: str = Field(default="", description="Supabase service role key (server-side)")
+    # ── SQLite Database ──────────────────────────────────────────
+    sqlite_db_path: str = Field(default="sqlite2.db", description="Path to SQLite database file")
 
     # ── Search / Tools ───────────────────────────────────────────
     tavily_api_key: str = Field(default="", description="Tavily search API key")
@@ -86,7 +84,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")
 
     # ── Rate Limiting ────────────────────────────────────────────
-    rate_limit_rpm: int = Field(default=60, description="API requests per minute per IP")
+    rate_limit_rpm: int = Field(default=6000, description="API requests per minute per IP")
 
     # ── Stripe Billing ───────────────────────────────────────────
     stripe_secret_key: str = Field(default="", description="Stripe secret key")
@@ -136,8 +134,8 @@ class Settings(BaseSettings):
         return bool(self.tavily_api_key)
 
     @property
-    def has_supabase(self) -> bool:
-        return bool(self.supabase_url and self.supabase_anon_key)
+    def has_sqlite(self) -> bool:
+        return bool(self.sqlite_db_path)
 
 
 @lru_cache()

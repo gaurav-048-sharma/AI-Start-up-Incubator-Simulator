@@ -151,9 +151,9 @@ def get_graph_structure() -> dict:
     """Return the graph structure for frontend visualization."""
     return {
         "nodes": [
-            {"id": "research", "label": "Research", "type": "agent", "description": "Market Analysis & Tech Architecture"},
+            {"id": "research", "label": "Research", "type": "agent", "description": "Market, Tech & Product Spec"},
             {"id": "validate", "label": "Quality Gate", "type": "decision", "description": "Evaluate research quality"},
-            {"id": "plan", "label": "Plan", "type": "agent", "description": "Growth Strategy, Financials & Legal"},
+            {"id": "plan", "label": "Plan", "type": "agent", "description": "Growth, Financial, Legal & Operations"},
             {"id": "build", "label": "Build", "type": "process", "description": "Executive Summary & Pitch Deck"},
             {"id": "simulate", "label": "Simulate", "type": "agent", "description": "Investor Pitch Simulation"},
             {"id": "error_handler", "label": "Error Handler", "type": "error", "description": "Handle workflow failures"},
@@ -209,11 +209,6 @@ async def run_incubation_workflow(idea: dict, user_id: str) -> dict:
 
     final_state = initial_state
     
-    logger.info("Before astream loop", current_phase=initial_state.get("current_phase"), nodes=list(compiled_graph._nodes.keys()), entry=compiled_graph._entry)
-    print("----- DEBUG BEFORE ASTREAM -----")
-    print("compiled_graph nodes:", getattr(compiled_graph, "_nodes", "NO _NODES ATTR"))
-    print("compiled_graph entry:", getattr(compiled_graph, "_entry", "NO _ENTRY ATTR"))
-    print("--------------------------------")
     try:
         # Use stream_mode="updates" to get state updates after each node
         async for output in compiled_graph.astream(initial_state, stream_mode="updates"):
@@ -229,12 +224,14 @@ async def run_incubation_workflow(idea: dict, user_id: str) -> dict:
                 if node_name == "research":
                     await db.log_agent_activity({"id": str(uuid4()), "idea_id": idea["id"], "agent_name": "Market Analyst", "agent_role": "market_analyst", "action": "Conducted market research", "status": "completed"})
                     await db.log_agent_activity({"id": str(uuid4()), "idea_id": idea["id"], "agent_name": "Tech Architect", "agent_role": "tech_architect", "action": "Designed technical architecture", "status": "completed"})
+                    await db.log_agent_activity({"id": str(uuid4()), "idea_id": idea["id"], "agent_name": "Product Manager", "agent_role": "product_manager", "action": "Created product spec & user stories", "status": "completed"})
                 elif node_name == "validate":
                     await db.log_agent_activity({"id": str(uuid4()), "idea_id": idea["id"], "agent_name": "Quality Assurance", "agent_role": "qa", "action": "Validated research outputs", "status": "completed"})
                 elif node_name == "plan":
                     await db.log_agent_activity({"id": str(uuid4()), "idea_id": idea["id"], "agent_name": "Growth Strategist", "agent_role": "strategist", "action": "Created go-to-market strategy", "status": "completed"})
                     await db.log_agent_activity({"id": str(uuid4()), "idea_id": idea["id"], "agent_name": "Financial Analyst", "agent_role": "finance", "action": "Generated financial projections", "status": "completed"})
                     await db.log_agent_activity({"id": str(uuid4()), "idea_id": idea["id"], "agent_name": "Legal Advisor", "agent_role": "legal", "action": "Conducted legal & IP review", "status": "completed"})
+                    await db.log_agent_activity({"id": str(uuid4()), "idea_id": idea["id"], "agent_name": "Operations Manager", "agent_role": "operations_manager", "action": "Created day-1 operations plan", "status": "completed"})
                 elif node_name == "build":
                     await db.log_agent_activity({"id": str(uuid4()), "idea_id": idea["id"], "agent_name": "Tech Architect", "agent_role": "tech_architect", "action": "Drafted executive summary & pitch deck", "status": "completed"})
                 elif node_name == "simulate":

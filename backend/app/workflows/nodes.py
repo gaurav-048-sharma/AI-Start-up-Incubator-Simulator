@@ -30,11 +30,15 @@ async def research_node(state: IncubatorState) -> dict:
         # Run tech architecture (can use market research for context)
         tech_output = await crew.run_single_agent("tech_architect", idea)
 
+        # Run product management
+        product_output = await crew.run_single_agent("product_manager", idea)
+
         return {
             "market_research": market_output,
             "tech_architecture": tech_output,
+            "product_spec": product_output,
             "current_phase": "validate",
-            "messages": [f"[{_timestamp()}] Research phase completed — market analysis and tech architecture generated."],
+            "messages": [f"[{_timestamp()}] Research phase completed — market analysis, tech architecture, and product spec generated."],
         }
     except Exception as e:
         logger.error("Research node failed", error=str(e))
@@ -118,12 +122,16 @@ async def plan_node(state: IncubatorState) -> dict:
         # Run legal review
         legal_output = await crew.run_single_agent("legal_advisor", idea)
 
+        # Run operations planning
+        operations_output = await crew.run_single_agent("operations_manager", idea)
+
         return {
             "growth_strategy": growth_output,
             "financial_projection": financial_output,
             "legal_review": legal_output,
+            "operations_plan": operations_output,
             "current_phase": "build",
-            "messages": [f"[{_timestamp()}] Planning phase completed — growth, financial, and legal analysis generated."],
+            "messages": [f"[{_timestamp()}] Planning phase completed — growth, financial, legal, and operations plans generated."],
         }
     except Exception as e:
         logger.error("Plan node failed", error=str(e))
@@ -151,17 +159,19 @@ async def build_node(state: IncubatorState) -> dict:
             f"## Startup Idea:\n{_format_idea(state['idea'])}\n\n"
             f"## Market Research:\n{state.get('market_research', 'N/A')[:2000]}\n\n"
             f"## Tech Architecture:\n{state.get('tech_architecture', 'N/A')[:2000]}\n\n"
+            f"## Product Spec:\n{state.get('product_spec', 'N/A')[:2000]}\n\n"
             f"## Growth Strategy:\n{state.get('growth_strategy', 'N/A')[:2000]}\n\n"
             f"## Financial Projections:\n{state.get('financial_projection', 'N/A')[:2000]}\n\n"
             f"## Legal Review:\n{state.get('legal_review', 'N/A')[:1000]}\n\n"
+            f"## Operations Plan:\n{state.get('operations_plan', 'N/A')[:1000]}\n\n"
             "Create an executive summary with these sections:\n"
             "1. The Problem & Opportunity\n"
-            "2. Our Solution\n"
+            "2. Our Solution & Product Spec\n"
             "3. Market Opportunity (TAM/SAM/SOM)\n"
             "4. Business Model & Unit Economics\n"
             "5. Competitive Advantage\n"
             "6. Go-to-Market Strategy\n"
-            "7. Financial Highlights\n"
+            "7. Financial Highlights & Operations Plan\n"
             "8. The Ask (funding amount and use of funds)\n"
         )
 
@@ -179,12 +189,13 @@ async def build_node(state: IncubatorState) -> dict:
 
         pitch_deck = await llm_service.generate(pitch_prompt)
 
-        # Build report metadata
         reports = [
             {"type": "market_research", "title": "Market Research Report", "status": "completed"},
             {"type": "tech_architecture", "title": "Technical Architecture", "status": "completed"},
+            {"type": "product_spec", "title": "Product Specification", "status": "completed"},
             {"type": "growth_strategy", "title": "Growth Strategy", "status": "completed"},
             {"type": "financial_projection", "title": "Financial Projections", "status": "completed"},
+            {"type": "operations_plan", "title": "Operations Plan", "status": "completed"},
             {"type": "legal_review", "title": "Legal & IP Review", "status": "completed"},
             {"type": "executive_summary", "title": "Executive Summary", "status": "completed"},
             {"type": "pitch_deck_content", "title": "Pitch Deck", "status": "completed"},

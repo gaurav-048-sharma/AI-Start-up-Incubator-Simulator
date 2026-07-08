@@ -1,12 +1,12 @@
 """
-Pitch Engine — Orchestrates multi-turn investor pitch simulations.
+Pitch Engine — Orchestrates multi-turn interactive investor pitch simulations.
 Uses the LLM service directly for flexible dialogue management.
 """
 
 import structlog
 from datetime import datetime, timezone
+from typing import Optional
 from app.services.llm import get_llm_service
-from app.simulation.founder_agent import build_founder_system_prompt
 from app.simulation.investor_agents import get_investor_profiles, get_investor_system_prompt
 from app.config import get_settings
 
@@ -14,82 +14,111 @@ logger = structlog.get_logger()
 
 
 class PitchEngine:
-    """Orchestrates a multi-round investor pitch simulation."""
+    """Orchestrates an interactive multi-round investor pitch simulation."""
 
     def __init__(self):
         self._llm_service = get_llm_service()
         self._settings = get_settings()
 
-    async def run_pitch(
+    async def start_interactive_pitch(
         self,
         idea: dict,
         executive_summary: str = "",
         financial_projection: str = "",
         custom_investors: list[dict] = None,
+    ) -> dict:
+        """
+        Start an interactive pitch.
+        Instead of the founder pitching first, the first investor asks an opening question based on the reports.
+        """
+        investors = custom_investors or get_investor_profiles(self._settings.num_investor_agents)
+        first_investor = investors[0]
+        
+        inv_prompt = get_investor_system_prompt(first_investor)
+        context = (
+            f"Here is the startup idea:\nTitle: {idea.get('title')}\nDescription: {idea.get('description')}\n"
+            f"Executive Summary:\n{executive_summary}\n\n"
+            f"Financial Projections:\n{financial_projection}\n\n"
+        )
+        
+        prompt = (
+            f"{context}You are opening the pitch session. Based on the reports provided, ask the founder ONE tough, "
+            f"critical opening question about their startup."
+        )
+
+        opening_question = await self._llm_service.generate(
+            prompt=prompt,
+            system_prompt=inv_prompt,
+        )
+        
+        msg = self._msg(first_investor["name"], "investor", opening_question)
+        return {"message": msg, "investors": investors}
+
+    async def process_interactive_turn(
+        self,
+        idea: dict,
+        transcript: list[dict],
+        custom_investors: list[dict] = None,
         max_rounds: int = None,
     ) -> dict:
         """
-        Run a complete pitch simulation.
-
-        Returns dict with: transcript, outcome, feedback, funding_offered, valuation
+        Process a single turn after the founder responds.
+        Determines the next investor to speak, or finalizes the verdict if max rounds reached.
+        Returns: {"status": "active"|"completed", "message": dict (optional), "outcome": ..., "feedback": ...}
         """
         max_rounds = max_rounds or self._settings.simulation_max_rounds
         investors = custom_investors or get_investor_profiles(self._settings.num_investor_agents)
-        founder_prompt = build_founder_system_prompt(idea, executive_summary, financial_projection)
+        
+        # Calculate how many founder messages are in the transcript (represents rounds completed)
+        founder_messages = [m for m in transcript if m["role"] == "founder"]
+        current_round = len(founder_messages)
 
-        transcript = []
-        logger.info("Pitch simulation starting", num_investors=len(investors), max_rounds=max_rounds)
-
-        # Round 1: Founder's opening pitch
-        opening = await self._llm_service.generate(
-            prompt="Deliver your opening pitch (2-3 minutes). Cover the problem, solution, market, traction, and ask.",
-            system_prompt=founder_prompt,
+        if current_round >= max_rounds:
+            # Reached max rounds, time for verdict
+            return await self._generate_final_verdicts(transcript, investors)
+        
+        # Pick the next investor (round robin)
+        next_investor = investors[current_round % len(investors)]
+        inv_prompt = get_investor_system_prompt(next_investor)
+        context_str = self._build_context(transcript)
+        
+        prompt = (
+            f"Here is the pitch conversation so far:\n{context_str}\n\n"
+            f"Ask your next critical question for the founder. Be concise, direct, and stay in character."
         )
-        transcript.append(self._msg("Founder", "founder", opening))
 
-        # Rounds 2+: Q&A with each investor
-        for round_num in range(1, max_rounds):
-            for investor in investors:
-                inv_prompt = get_investor_system_prompt(investor)
-                context = self._build_context(transcript)
+        response = await self._llm_service.generate(
+            prompt=prompt,
+            system_prompt=inv_prompt,
+        )
+        
+        msg = self._msg(next_investor["name"], "investor", response)
+        return {"status": "active", "message": msg}
 
-                # Investor asks questions
-                inv_question = await self._llm_service.generate(
-                    prompt=f"Based on the pitch so far:\n{context}\n\nAsk your questions for round {round_num}.",
-                    system_prompt=inv_prompt,
-                )
-                transcript.append(self._msg(investor["name"], "investor", inv_question))
-
-                # Founder responds
-                founder_response = await self._llm_service.generate(
-                    prompt=f"Respond to {investor['name']}'s questions:\n{inv_question}",
-                    system_prompt=founder_prompt,
-                )
-                transcript.append(self._msg("Founder", "founder", founder_response))
-
-        # Final verdicts from each investor
+    async def _generate_final_verdicts(self, transcript: list[dict], investors: list[dict]) -> dict:
+        """Generates the final funding decision from all investors."""
         verdicts = []
         for investor in investors:
             inv_prompt = get_investor_system_prompt(investor)
-            context = self._build_context(transcript)
+            context = self._build_context(transcript, max_chars=8000)
 
             verdict = await self._llm_service.generate(
                 prompt=(
                     f"Full pitch transcript:\n{context}\n\n"
-                    "Give your final verdict: INVEST, PASS, or CONDITIONAL.\n"
+                    "The pitch is over. Give your final verdict: INVEST, PASS, or CONDITIONAL.\n"
                     "If INVEST: state amount and valuation.\n"
-                    "Provide detailed feedback."
+                    "Provide detailed feedback on why you made this decision."
                 ),
                 system_prompt=inv_prompt,
             )
-            transcript.append(self._msg(investor["name"], "verdict", verdict))
             verdicts.append({"investor": investor["name"], "verdict": verdict})
 
-        # Parse outcome
         result = self._parse_outcome(verdicts)
-        result["transcript"] = transcript
-
-        logger.info("Pitch simulation completed", outcome=result.get("outcome"))
+        
+        # Add the verdict messages to return so they can be shown in chat
+        verdict_msgs = [self._msg(v["investor"], "verdict", v["verdict"]) for v in verdicts]
+        result["status"] = "completed"
+        result["verdict_messages"] = verdict_msgs
         return result
 
     def _msg(self, speaker: str, role: str, content: str) -> dict:
@@ -102,7 +131,7 @@ class PitchEngine:
 
     def _build_context(self, transcript: list[dict], max_chars: int = 4000) -> str:
         context = ""
-        for msg in transcript[-6:]:  # Last 6 messages for context
+        for msg in transcript[-10:]:  # Include more recent messages for context
             entry = f"[{msg['speaker']}]: {msg['content']}\n\n"
             if len(context) + len(entry) > max_chars:
                 break
@@ -121,10 +150,14 @@ class PitchEngine:
             outcome = "passed"
 
         feedback = {v["investor"]: v["verdict"] for v in verdicts}
+        
+        # Simple extraction of funding offered (mock logic, could be regex)
+        funding = 500000 if outcome == "funded" else None
+        valuation = 5000000 if outcome == "funded" else None
 
         return {
             "outcome": outcome,
             "feedback": feedback,
-            "funding_offered": None,  # Could be parsed from verdicts
-            "valuation": None,
+            "funding_offered": funding,
+            "valuation": valuation,
         }

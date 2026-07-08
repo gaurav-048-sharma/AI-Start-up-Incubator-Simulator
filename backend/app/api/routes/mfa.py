@@ -64,7 +64,7 @@ class MfaUnenrollRequest(BaseModel):
 def _get_supabase_auth_url() -> str:
     """Get the Supabase Auth base URL."""
     settings = get_settings()
-    base = settings.supabase_url
+    base = ''
     if not base:
         raise HTTPException(status_code=500, detail="Supabase is not configured")
     return f"{base}/auth/v1"
@@ -78,7 +78,7 @@ def _get_auth_headers() -> dict:
         raise HTTPException(status_code=401, detail="No active JWT session")
     return {
         "Authorization": f"Bearer {token}",
-        "apikey": settings.supabase_anon_key or "",
+        "apikey": '' or "",
         "Content-Type": "application/json",
     }
 

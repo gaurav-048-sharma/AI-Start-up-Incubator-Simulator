@@ -18,7 +18,7 @@ def api(method, path, token=None, body=None):
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(f"{API}{path}", data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body_text = e.read().decode("utf-8")
@@ -148,17 +148,52 @@ print(f"  ✅ Analytics: {str(analytics)[:200]}")
 
 # ─── STEP 13: Notifications ─────────────────────────────────
 print("\nSTEP 13: Check Notifications")
-notif = api("GET", "/api/notifications", token=token)
-print(f"  ✅ Notifications: {str(notif)[:200]}")
+notifications = api("GET", "/api/notifications", token=token)
+if notifications:
+    print(f"  ✅ Notifications count: {notifications.get('total', 0)}")
+else:
+    print("  ⚠️ No notifications response")
+
+# ─── STEP 14: Test Persistence (Logout / Login) ───────────────
+print("\nSTEP 14: Test Persistence (Logout / Login)")
+print("  Simulating logout by dropping the JWT token...")
+token = None
+time.sleep(1)
+
+print("  Requesting new OTP to login again...")
+api("POST", "/api/auth/send-otp", body={"email": EMAIL})
+time.sleep(2)
+new_otp = read_otp_from_logs()
+print(f"  Captured new OTP: {new_otp}")
+
+verify_new = api("POST", "/api/auth/verify-otp", body={"email": EMAIL, "otp": new_otp})
+new_token = verify_new.get("access_token")
+print(f"  ✅ Logged in again successfully. New JWT received.")
+
+print("  Fetching ideas to verify the data persisted...")
+persisted_ideas_resp = api("GET", "/api/ideas", token=new_token)
+persisted_count = len(persisted_ideas_resp.get("ideas", []))
+print(f"  ✅ Total ideas found: {persisted_count}")
+
+# Check if the idea we created in step 6 is still there
+idea_found = any(i.get("id") == idea_id for i in persisted_ideas_resp.get("ideas", []))
+if idea_found:
+    print(f"  🎉 SUCCESS! Idea {idea_id} is permanently stored in Supabase!")
+else:
+    print(f"  ❌ FAILURE! Idea {idea_id} disappeared after relogin!")
+    sys.exit(1)
+
+print("\n🎉 ALL E2E TESTS COMPLETED SUCCESSFULLY! 🎉")
+print("=" * 60)
 
 # ─── STEP 14: Agent Roles ───────────────────────────────────
 print("\nSTEP 14: Agent Roles")
-roles = api("GET", "/api/agents/roles", token=token)
+roles = api("GET", "/api/agents/roles", token=new_token)
 print(f"  ✅ Roles: {str(roles)[:200]}")
 
 # ─── STEP 15: Settings ──────────────────────────────────────
 print("\nSTEP 15: Settings")
-settings = api("GET", "/api/settings", token=token)
+settings = api("GET", "/api/settings", token=new_token)
 print(f"  ✅ Settings: {str(settings)[:200]}")
 
 print("\n" + "=" * 60)

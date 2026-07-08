@@ -38,6 +38,7 @@ export async function apiRequest<T>(endpoint: string, options: ApiOptions = {}):
 
   const config: RequestInit = {
     method,
+    cache: "no-store",
     headers: {
       ...(authHeaders as Record<string, string>),
       ...headers,
@@ -80,6 +81,22 @@ export const ideasApi = {
   delete: (id: string) => apiRequest<void>(`/api/ideas/${id}`, { method: "DELETE" }),
   launch: (id: string) =>
     apiRequest<{ idea_id: string; status: string; message: string }>(`/api/ideas/${id}/launch`, { method: "POST" }),
+  publish: (id: string) =>
+    apiRequest<{ public_slug: string }>(`/api/ideas/${id}/publish`, { method: "POST" }),
+};
+
+// ── Public API ───────────────────────────────────────────────────
+export const publicApi = {
+  getIdea: (slug: string) => apiRequest<{ idea: Idea; reports: Report[] }>(`/api/public/ideas/${slug}`),
+};
+
+export const buildApi = {
+  start: (ideaId: string) =>
+    apiRequest<any>(`/api/build/ideas/${ideaId}/start`, { method: "POST" }),
+  get: (ideaId: string) => 
+    apiRequest<any>(`/api/build/ideas/${ideaId}`),
+  sendMessage: (ideaId: string, message: string) =>
+    apiRequest<any>(`/api/build/ideas/${ideaId}/message`, { method: "POST", body: { message } }),
 };
 
 // ── Agents API ───────────────────────────────────────────────────
@@ -111,6 +128,10 @@ export const simulationsApi = {
   get: (simId: string) => apiRequest<Simulation>(`/api/simulations/${simId}`),
   listForIdea: (ideaId: string) =>
     apiRequest<{ simulations: Simulation[] }>(`/api/simulations/ideas/${ideaId}/list`),
+  sendMessage: (simId: string, message: string) =>
+    apiRequest<Simulation>(`/api/simulations/${simId}/message`, { method: "POST", body: { message } }),
+  delete: (simId: string) => 
+    apiRequest<{ message: string }>(`/api/simulations/${simId}`, { method: "DELETE" }),
 };
 
 // ── Analytics API ────────────────────────────────────────────────
@@ -301,6 +322,8 @@ export interface Idea {
   current_phase?: string;
   progress: number;
   metadata: Record<string, unknown>;
+  is_public?: number;
+  public_slug?: string;
   created_at: string;
   updated_at: string;
 }
@@ -366,6 +389,7 @@ export interface Simulation {
   id: string;
   idea_id: string;
   simulation_type: string;
+  status: string;
   investor_profiles: Record<string, unknown>[];
   transcript: { speaker: string; role: string; content: string; timestamp: string }[];
   outcome?: string;

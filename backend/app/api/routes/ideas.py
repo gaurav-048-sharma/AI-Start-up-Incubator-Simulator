@@ -36,8 +36,7 @@ async def create_idea(
     idea_data = {
         "id": str(uuid4()),
         "user_id": user["id"],
-        "organization_id": org_id,
-        "department_id": getattr(idea, 'department_id', None),
+        "organization_id": user.get("org_id"),
         "title": idea.title,
         "description": idea.description,
         "industry": idea.industry,
@@ -68,17 +67,14 @@ async def list_ideas(
     user: dict = Depends(get_current_user),
 ):
     """
-    List ideas for the active organization.
-    Strictly scoped to the X-Org-Id header.
+    List ideas for the active user.
     """
     db = get_db_service()
-    org_id = user.get("org_id")
     
-    # If no org_id, we return empty list rather than global list (Air-Gap Protection)
-    # We no longer use org_id in single-user mode
-        
-    res = await db.get_ideas(organization_id=None)
-    return res
+    # Fetch ideas for the current user
+    ideas_list = await db.get_user_ideas(user_id=user["id"])
+    
+    return {"ideas": ideas_list, "total": len(ideas_list)}
 
 
 @router.get("/{idea_id}", response_model=IdeaResponse)
@@ -162,8 +158,9 @@ async def launch_incubation(
     if False:
         raise HTTPException(status_code=403, detail="Unauthorized: Cannot launch simulation for other department.")
 
-    # Update status to processing
-    await db.update_idea(idea_id, {"status": "processing", "updated_at": datetime.now(timezone.utc).isoformat()})
+    # Update status to processing and reset progress
+    await db.update_idea(idea_id, {"status": "processing", "progress": 0, "updated_at": datetime.now(timezone.utc).isoformat()})
+    await db.clear_idea_artifacts(idea_id)
     
     # Run workflow in background
     background_tasks.add_task(
@@ -177,3 +174,34 @@ async def launch_incubation(
         "status": "launched",
         "message": f"AI Incubation workflow started for '{idea['title']}'. Reports will appear shortly."
     }
+
+import re
+import random
+import string
+
+def generate_slug(title: str) -> str:
+    slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+    random_suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    return f"{slug}-{random_suffix}" if slug else random_suffix
+
+@router.post("/{idea_id}/publish")
+async def publish_idea(
+    idea_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Publish an idea to the public."""
+    db = get_db_service()
+    idea = await db.get_idea(idea_id)
+    if not idea:
+        raise HTTPException(status_code=404, detail="Idea not found")
+    
+    if idea.get("user_id") != user["id"]:
+        raise HTTPException(status_code=403, detail="Not your idea")
+
+    if idea.get("is_public"):
+        return {"public_slug": idea.get("public_slug")}
+        
+    slug = generate_slug(idea["title"])
+    await db.update_idea(idea_id, {"is_public": 1, "public_slug": slug})
+    
+    return {"public_slug": slug}

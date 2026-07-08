@@ -6,20 +6,20 @@
 /* ── CSS Custom Properties (Design Tokens) ───────────────────── */
 :root {
   /* Colors — Rich dark palette */
-  --bg-primary: #0a0b0f;
-  --bg-secondary: #12141c;
-  --bg-tertiary: #1a1d2b;
-  --bg-elevated: #222538;
-  --bg-glass: rgba(22, 25, 40, 0.72);
-  --bg-glass-hover: rgba(30, 34, 55, 0.82);
+  --bg-primary: #09090b;
+  --bg-secondary: #0f172a;
+  --bg-tertiary: #1e293b;
+  --bg-elevated: #334155;
+  --bg-glass: rgba(15, 23, 42, 0.65);
+  --bg-glass-hover: rgba(30, 41, 59, 0.75);
 
-  /* Accent — Electric indigo/violet gradient */
-  --accent-primary: #6366f1;
-  --accent-secondary: #8b5cf6;
-  --accent-tertiary: #a78bfa;
-  --accent-glow: rgba(99, 102, 241, 0.25);
-  --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
-  --accent-gradient-vivid: linear-gradient(135deg, #4f46e5, #7c3aed, #c084fc);
+  /* Accent — Electric Cyan gradient */
+  --accent-primary: #00E5FF;
+  --accent-secondary: #06b6d4;
+  --accent-tertiary: #0891b2;
+  --accent-glow: rgba(0, 229, 255, 0.3);
+  --accent-gradient: linear-gradient(135deg, #00E5FF, #06b6d4, #3b82f6);
+  --accent-gradient-vivid: linear-gradient(135deg, #22d3ee, #00E5FF, #60a5fa);
 
   /* Status Colors */
   --success: #10b981;
@@ -39,20 +39,21 @@
   --text-accent: #a78bfa;
 
   /* Borders */
-  --border-default: rgba(148, 163, 184, 0.08);
+  --border-default: rgba(148, 163, 184, 0.1);
   --border-subtle: rgba(148, 163, 184, 0.05);
-  --border-accent: rgba(99, 102, 241, 0.3);
-  --border-glow: rgba(99, 102, 241, 0.5);
+  --border-accent: rgba(0, 229, 255, 0.3);
+  --border-glow: rgba(0, 229, 255, 0.5);
 
   /* Shadows */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.5);
-  --shadow-glow: 0 0 30px rgba(99, 102, 241, 0.15);
-  --shadow-glow-lg: 0 0 60px rgba(99, 102, 241, 0.2);
+  --shadow-glow: 0 0 30px rgba(0, 229, 255, 0.15);
+  --shadow-glow-lg: 0 0 60px rgba(0, 229, 255, 0.25);
 
   /* Typography */
-  --font-sans: 'Inter', var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  --font-sans: var(--font-inter), var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  --font-heading: var(--font-space-grotesk), var(--font-inter), sans-serif;
   --font-mono: 'JetBrains Mono', var(--font-geist-mono), monospace;
   --fs-xs: 0.75rem;
   --fs-sm: 0.875rem;

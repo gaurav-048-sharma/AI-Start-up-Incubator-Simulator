@@ -1,15 +1,10 @@
-"""
-Notification service — manages in-app notifications and webhook dispatch.
-Supports workflow completion alerts, credit warnings, and custom webhooks.
-"""
-
 import structlog
 import httpx
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4
 
-from app.models.database import get_db_service
+from app.models.database import get_db_connection, _serialize_json
 
 logger = structlog.get_logger()
 
@@ -18,7 +13,7 @@ class NotificationService:
     """In-app notification management and webhook dispatch."""
 
     def __init__(self):
-        self._db = get_db_service()
+        pass
 
     async def create(
         self,
@@ -43,9 +38,16 @@ class NotificationService:
         }
 
         try:
-            result = self._db._client.table("notifications").insert(notif).execute()
+            data = _serialize_json(notif)
+            keys = list(data.keys())
+            values = list(data.values())
+            placeholders = ", ".join(["?"] * len(keys))
+            query = f"INSERT INTO notifications ({', '.join(keys)}) VALUES ({placeholders})"
+            async with get_db_connection() as conn:
+                await conn.execute(query, values)
+                await conn.commit()
             logger.info("Notification created", user_id=user_id, type=notification_type)
-            return result.data[0] if result.data else notif
+            return notif
         except Exception as e:
             logger.error("Failed to create notification", error=str(e))
             return None
@@ -57,53 +59,40 @@ class NotificationService:
         limit: int = 20,
     ) -> list[dict]:
         """Get notifications for a user, optionally filtered to unread only."""
-        if not self._db._client:
-            return []
-            
         try:
-            query = (
-                self._db._client.table("notifications")
-                .select("*")
-                .eq("user_id", user_id)
-                .order("created_at", desc=True)
-                .limit(limit)
-            )
+            query = "SELECT * FROM notifications WHERE user_id = ?"
+            params = [user_id]
             if unread_only:
-                query = query.eq("is_read", False)
-
-            result = query.execute()
-            return result.data or []
+                query += " AND is_read = 0"
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+            async with get_db_connection() as conn:
+                async with conn.execute(query, params) as cursor:
+                    results = await cursor.fetchall()
+                    for r in results:
+                        r['is_read'] = bool(r['is_read'])
+                    return results
         except Exception as e:
             logger.error("Failed to get notifications", error=str(e))
             return []
 
     async def get_unread_count(self, user_id: str) -> int:
         """Get the count of unread notifications."""
-        if not self._db._client:
-            return 0
-            
         try:
-            result = (
-                self._db._client.table("notifications")
-                .select("id", count="exact")
-                .eq("user_id", user_id)
-                .eq("is_read", False)
-                .execute()
-            )
-            return result.count or 0
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT COUNT(id) as c FROM notifications WHERE user_id = ? AND is_read = 0", (user_id,)) as cursor:
+                    res = await cursor.fetchone()
+                    return res["c"] if res else 0
         except Exception as e:
             logger.error("Failed to get unread count", error=str(e))
             return 0
 
     async def mark_read(self, notification_id: str, user_id: str) -> bool:
         """Mark a single notification as read."""
-        if not self._db._client:
-            return True
-            
         try:
-            self._db._client.table("notifications").update(
-                {"is_read": True}
-            ).eq("id", notification_id).eq("user_id", user_id).execute()
+            async with get_db_connection() as conn:
+                await conn.execute("UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?", (notification_id, user_id))
+                await conn.commit()
             return True
         except Exception as e:
             logger.error("Failed to mark notification read", error=str(e))
@@ -111,13 +100,10 @@ class NotificationService:
 
     async def mark_all_read(self, user_id: str) -> bool:
         """Mark all unread notifications as read for a user."""
-        if not self._db._client:
-            return True
-            
         try:
-            self._db._client.table("notifications").update(
-                {"is_read": True}
-            ).eq("user_id", user_id).eq("is_read", False).execute()
+            async with get_db_connection() as conn:
+                await conn.execute("UPDATE notifications SET is_read = 1 WHERE user_id = ? AND is_read = 0", (user_id,))
+                await conn.commit()
             return True
         except Exception as e:
             logger.error("Failed to mark all read", error=str(e))
@@ -125,13 +111,10 @@ class NotificationService:
 
     async def delete_notification(self, notification_id: str, user_id: str) -> bool:
         """Delete a notification."""
-        if not self._db._client:
-            return True
-            
         try:
-            self._db._client.table("notifications").delete().eq(
-                "id", notification_id
-            ).eq("user_id", user_id).execute()
+            async with get_db_connection() as conn:
+                await conn.execute("DELETE FROM notifications WHERE id = ? AND user_id = ?", (notification_id, user_id))
+                await conn.commit()
             return True
         except Exception as e:
             logger.error("Failed to delete notification", error=str(e))
@@ -202,14 +185,11 @@ class NotificationService:
     async def _dispatch_webhook(self, user_id: str, payload: dict) -> None:
         """Send a webhook POST to the user's configured URL, if any."""
         try:
-            settings = (
-                self._db._client.table("user_settings")
-                .select("webhook_url")
-                .eq("user_id", user_id)
-                .single()
-                .execute()
-            )
-            webhook_url = settings.data.get("webhook_url") if settings.data else None
+            webhook_url = None
+            async with get_db_connection() as conn:
+                async with conn.execute("SELECT webhook_url FROM user_settings WHERE user_id = ?", (user_id,)) as cursor:
+                    res = await cursor.fetchone()
+                    webhook_url = res["webhook_url"] if res else None
 
             if not webhook_url:
                 return

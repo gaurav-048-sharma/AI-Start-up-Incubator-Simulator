@@ -46,10 +46,6 @@ export default function ComparePage() {
     }
   };
 
-  const getMaxScore = (dim: ComparisonResult["dimensions"][0]) => {
-    return Math.max(...Object.values(dim.scores), 0.01);
-  };
-
   return (
     <div className="animate-fade-in">
       <p className={styles.subtitle}>
@@ -128,7 +124,6 @@ export default function ComparePage() {
                   <div className={styles.dimBars}>
                     {result.ideas.map((idea, idx) => {
                       const score = dim.scores[idea.id] || 0;
-                      const maxScore = getMaxScore(dim);
                       const colors = [
                         "var(--accent-primary)",
                         "var(--accent-secondary)",
@@ -144,7 +139,7 @@ export default function ComparePage() {
                             <div
                               className={styles.barFill}
                               style={{
-                                width: `${(score / maxScore) * 100}%`,
+                                width: `${Math.max(score * 100, 1)}%`,
                                 background: colors[idx],
                               }}
                             />
@@ -193,7 +188,10 @@ export default function ComparePage() {
           {result.recommendation && (
             <div className={`${styles.recommendation} glass-card`}>
               <h3 className={styles.chartTitle}>🤖 AI Recommendation</h3>
-              <p className={styles.recText}>{result.recommendation}</p>
+              <div 
+                className={styles.recText} 
+                dangerouslySetInnerHTML={{ __html: result.recommendation }}
+              />
             </div>
           )}
         </div>

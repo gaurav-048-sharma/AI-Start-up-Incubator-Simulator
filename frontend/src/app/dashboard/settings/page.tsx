@@ -120,7 +120,7 @@ export default function SettingsPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("supabase_session") ? JSON.parse(localStorage.getItem("supabase_session")!).access_token : ""}`,
+          "Authorization": `Bearer ${localStorage.getItem("access_token") || ""}`,
           "X-Org-Id": localStorage.getItem("activeOrgId") || "",
         },
         body: JSON.stringify({ tier })

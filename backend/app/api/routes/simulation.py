@@ -24,7 +24,7 @@ async def start_simulation(
     user: dict = Depends(get_current_user),
 ):
     """
-    Begin an investor pitch simulation for an idea.
+    Begin an interactive investor pitch simulation for an idea.
     Scopes record to active organization.
     """
     db = get_db_service()
@@ -46,7 +46,7 @@ async def start_simulation(
         "idea_id": idea_id,
         "organization_id": None,
         "status": "active",
-        "investor_profile": config.investor_profile if config else "standard",
+        "investor_profiles": [],
         "transcript": [],
         "created_at": datetime.now(timezone.utc).isoformat(),
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -54,26 +54,100 @@ async def start_simulation(
     }
 
     try:
-        # Fetch required reports for context
         executive_summary = idea.get("executive_summary", "")
         financial_projection = idea.get("financial_projection", "")
         
-        # Initialize engine and run full simulation
         engine = PitchEngine()
-        result = await engine.run_pitch(idea, executive_summary, financial_projection)
+        result = await engine.start_interactive_pitch(idea, executive_summary, financial_projection)
         
-        sim_data["transcript"] = result.get("transcript", [])
-        sim_data["outcome"] = result.get("outcome", "completed")
-        sim_data["feedback"] = result.get("feedback", {})
-        sim_data["funding_offered"] = result.get("funding_offered")
-        sim_data["valuation"] = result.get("valuation")
-        sim_data["status"] = "completed"
+        sim_data["transcript"] = [result["message"]]
+        sim_data["investor_profiles"] = result["investors"]
+        sim_data["status"] = "active"
         
         db_result = await db.create_simulation(sim_data)
         return db_result or sim_data
     except Exception as e:
         logger.error("Failed to start simulation", error=str(e), idea_id=idea_id)
         raise HTTPException(status_code=500, detail="Failed to initialize simulator")
+
+
+@router.post("/{sim_id}/message", response_model=SimulationResponse)
+async def send_simulation_message(
+    sim_id: str,
+    payload: SimulationRespond,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Send a message as the founder and get the next response from the investors.
+    """
+    db = get_db_service()
+    sim = await db.get_simulation(sim_id)
+    
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    if sim.get("status") != "active":
+        raise HTTPException(status_code=400, detail="Simulation is already completed")
+
+    # Scope verification
+    if user.get("platform_role") != "super_admin":
+        if False:
+             raise HTTPException(status_code=403, detail="Access denied")
+             
+    idea = await db.get_idea(sim["idea_id"])
+    
+    founder_msg = {
+        "speaker": "Founder",
+        "role": "founder",
+        "content": payload.message,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    
+    import json
+    
+    transcript = sim.get("transcript", [])
+    if isinstance(transcript, str):
+        try:
+            transcript = json.loads(transcript)
+        except Exception:
+            transcript = []
+            
+    transcript.append(founder_msg)
+    sim["transcript"] = transcript
+
+    investors = sim.get("investor_profiles", [])
+    if isinstance(investors, str):
+        try:
+            investors = json.loads(investors)
+        except Exception:
+            investors = None
+
+    try:
+        engine = PitchEngine()
+        result = await engine.process_interactive_turn(
+            idea=idea,
+            transcript=sim["transcript"],
+            custom_investors=investors
+        )
+        
+        sim["status"] = result["status"]
+        if result.get("message"):
+            sim["transcript"].append(result["message"])
+        
+        if result["status"] == "completed":
+            sim["outcome"] = result.get("outcome")
+            sim["feedback"] = result.get("feedback")
+            sim["funding_offered"] = result.get("funding_offered")
+            sim["valuation"] = result.get("valuation")
+            sim["completed_at"] = datetime.now(timezone.utc).isoformat()
+            if result.get("verdict_messages"):
+                sim["transcript"].extend(result["verdict_messages"])
+                
+        sim["updated_at"] = datetime.now(timezone.utc).isoformat()
+        db_result = await db.update_simulation(sim_id, sim)
+        return db_result or sim
+    except Exception as e:
+        logger.error("Failed to process simulation turn", error=str(e), sim_id=sim_id)
+        raise HTTPException(status_code=500, detail="Failed to process pitch engine turn")
 
 
 @router.get("/{sim_id}", response_model=SimulationResponse)
@@ -110,15 +184,38 @@ async def list_simulations(
     """
     db = get_db_service()
     
-    # 1. Fetch current idea state to verify organization
     idea = await db.get_idea(idea_id)
     if not idea:
         raise HTTPException(status_code=404, detail="Idea not found")
         
-    # 2. Scope verification
     if user.get("platform_role") != "super_admin":
         if False:
              raise HTTPException(status_code=403, detail="Access denied")
 
     sims = await db.get_idea_simulations(idea_id)
     return {"simulations": sims}
+
+
+@router.delete("/{sim_id}")
+async def delete_simulation(
+    sim_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Delete a simulation by ID.
+    """
+    db = get_db_service()
+    sim = await db.get_simulation(sim_id)
+    
+    if not sim:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+
+    if user.get("platform_role") != "super_admin":
+        if False:
+             raise HTTPException(status_code=403, detail="Access denied")
+
+    success = await db.delete_simulation(sim_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete simulation")
+
+    return {"message": "Simulation deleted successfully"}

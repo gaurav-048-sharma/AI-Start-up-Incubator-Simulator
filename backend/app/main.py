@@ -16,7 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.api.routes import ideas, agents, workflows, simulation, reports
 from app.api.routes import analytics, notifications, settings as settings_routes, comparison
-from app.api.routes import otp_auth
+from app.api.routes import build
+from app.api.routes import auth
 from app.api.websockets import router as ws_router
 from app.api.websockets import router as ws_router
 from app.middleware.security import (
@@ -37,8 +38,12 @@ async def lifespan(app: FastAPI):
         version=settings.app_version,
         environment=settings.environment,
         llm_provider=settings.llm_provider,
-        supabase_connected=settings.has_supabase,
+        sqlite_connected=settings.has_sqlite,
     )
+    
+    # Initialize SQLite schema
+    from app.models.database import init_db
+    await init_db()
 
     # Initialize Redis cache (optional)
     try:
@@ -124,10 +129,11 @@ def create_app() -> FastAPI:
     app.include_router(notifications.router, prefix="/api/notifications", tags=["Notifications"])
     app.include_router(settings_routes.router, prefix="/api/settings", tags=["Settings"])
     app.include_router(comparison.router, prefix="/api/ideas", tags=["Comparison"])
+    app.include_router(build.router, prefix="/api/build", tags=["Build"])
     app.include_router(ws_router, tags=["WebSocket"])
 
     # ── Auth Routes ────────────────────────────────────────
-    app.include_router(otp_auth.router, prefix="/api/auth", tags=["Authentication"])
+    app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 
     from fastapi.exceptions import RequestValidationError
     from fastapi.responses import JSONResponse
@@ -167,7 +173,7 @@ def create_app() -> FastAPI:
             "environment": settings.environment,
             "services": {
                 "nvidia": settings.has_nvidia,
-                "supabase": settings.has_supabase,
+                "sqlite": settings.has_sqlite,
                 "tavily": settings.has_tavily,
                 "redis": cache.is_connected,
                 "sentry": bool(settings.sentry_dsn),

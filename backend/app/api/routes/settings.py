@@ -3,7 +3,7 @@ Settings API Routes — user preference management and persistence.
 """
 
 import structlog
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from app.middleware.security import get_current_user
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -43,21 +43,16 @@ class UserSettingsResponse(BaseModel):
 async def get_settings(user: dict = Depends(get_current_user)):
     """Get user settings (creates defaults if not exists)."""
     user_id = user["id"]
-    from app.models.database import get_db_service
-    db = get_db_service()
+    from app.models.database import get_db_connection
 
     try:
-        result = (
-            db._client.table("user_settings")
-            .select("*")
-            .eq("user_id", user_id)
-            .single()
-            .execute()
-        )
-        if result.data:
-            return result.data
-    except Exception:
-        pass
+        async with get_db_connection() as conn:
+            async with conn.execute("SELECT * FROM user_settings WHERE user_id = ?", (user_id,)) as cursor:
+                result = await cursor.fetchone()
+                if result:
+                    return result
+    except Exception as e:
+        logger.error("Failed to get settings", error=str(e))
 
     # Return defaults if no saved settings exist
     return UserSettingsResponse(user_id=user_id)
@@ -94,13 +89,26 @@ async def update_settings(update: UserSettingsUpdate, user: dict = Depends(get_c
                 detail=f"Model '{model}' is not valid for provider '{provider}'. Valid: {valid_models[provider]}",
             )
 
+    from app.models.database import get_db_connection, _serialize_json
     try:
-        if db._client is None:
-            # Mock mode — return merged defaults
-            return UserSettingsResponse(user_id=user_id, **{k: v for k, v in update_data.items() if k != "user_id"})
-        result = db._client.table("user_settings").upsert(update_data).execute()
-        if result.data:
-            return result.data[0]
+        data = _serialize_json(update_data)
+        keys = list(data.keys())
+        values = list(data.values())
+        placeholders = ", ".join(["?"] * len(keys))
+        
+        # SQLite Upsert
+        query = f"INSERT INTO user_settings ({', '.join(keys)}) VALUES ({placeholders}) ON CONFLICT(user_id) DO UPDATE SET "
+        query += ", ".join([f"{k}=excluded.{k}" for k in keys if k != "user_id"])
+        
+        async with get_db_connection() as conn:
+            await conn.execute(query, values)
+            await conn.commit()
+            
+            async with conn.execute("SELECT * FROM user_settings WHERE user_id = ?", (user_id,)) as cursor:
+                result = await cursor.fetchone()
+                if result:
+                    return result
+                    
         return UserSettingsResponse(user_id=user_id, **{k: v for k, v in update_data.items() if k != "user_id"})
     except Exception as e:
         logger.error("Failed to update settings", error=str(e))

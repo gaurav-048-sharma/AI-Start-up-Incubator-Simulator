@@ -10,18 +10,28 @@ export default function IdeasPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
+    let mounted = true;
+    async function load(isInitial = false) {
+      if (isInitial) setLoading(true);
       try {
         const data = await ideasApi.list();
-        setIdeas(data.ideas || []);
+        if (mounted) setIdeas(data.ideas || []);
       } catch {
-        setIdeas([]);
+        if (mounted && isInitial) setIdeas([]);
       } finally {
-        setLoading(false);
+        if (mounted && isInitial) setLoading(false);
       }
     }
-    load();
+    load(true);
+
+    const interval = setInterval(() => {
+      load(false);
+    }, 3000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   return (
@@ -47,7 +57,12 @@ export default function IdeasPage() {
             {ideas.map((idea) => (
               <Link key={idea.id} href={`/dashboard/ideas/${idea.id}`} className={`${styles.card} glass-card`}>
                 <div className={styles.cardHeader}>
-                  <span className={`badge ${getStatusBadge(idea.status)}`}>{idea.status}</span>
+                  <span className={`badge ${getStatusBadge(idea.status)}`} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {!['completed', 'failed', 'draft'].includes(idea.status) && (
+                      <span className="loader" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                    )}
+                    {idea.status}
+                  </span>
                   <span className={styles.cardDate}>{new Date(idea.created_at).toLocaleDateString()}</span>
                 </div>
                 <h3 className={styles.cardTitle}>{idea.title}</h3>

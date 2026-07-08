@@ -24,6 +24,7 @@ const NAV_TOOLS = [
   { href: "/dashboard/workflows", icon: "🔄", label: "Workflows" },
   { href: "/dashboard/reports", icon: "📄", label: "Reports" },
   { href: "/dashboard/simulation", icon: "🎯", label: "Pitch Simulation" },
+  { href: "/dashboard/build", icon: "💻", label: "Product Builder" },
   { href: "/dashboard/compare", icon: "⚖️", label: "Compare Ideas" },
 ];
 

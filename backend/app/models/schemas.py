@@ -56,8 +56,10 @@ class SubscriptionTier(str, Enum):
 class AgentRole(str, Enum):
     MARKET_ANALYST = "market_analyst"
     TECH_ARCHITECT = "tech_architect"
+    PRODUCT_MANAGER = "product_manager"
     GROWTH_STRATEGIST = "growth_strategist"
     FINANCIAL_ANALYST = "financial_analyst"
+    OPERATIONS_MANAGER = "operations_manager"
     LEGAL_ADVISOR = "legal_advisor"
 
 
@@ -72,8 +74,10 @@ class ReportType(str, Enum):
     MARKET_ANALYSIS = "market_analysis"
     MARKET_RESEARCH = "market_research"
     TECH_ARCHITECTURE = "tech_architecture"
+    PRODUCT_SPEC = "product_spec"
     GROWTH_STRATEGY = "growth_strategy"
     FINANCIAL_PROJECTION = "financial_projection"
+    OPERATIONS_PLAN = "operations_plan"
     LEGAL_REVIEW = "legal_review"
     PITCH_DECK = "pitch_deck"
     PITCH_DECK_CONTENT = "pitch_deck_content"
@@ -251,6 +255,7 @@ class SimulationResponse(BaseModel):
     idea_id: Union[str, UUID]
     organization_id: Optional[Union[str, UUID]] = None
     simulation_type: str = "pitch"
+    status: str = "active"
     investor_profiles: Any = []
     transcript: list[dict[str, Any]] = []
     outcome: Optional[str] = None
@@ -260,6 +265,21 @@ class SimulationResponse(BaseModel):
     score: Optional[float] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+
+class BuildSessionResponse(BaseModel):
+    """Build Phase session response."""
+    id: Union[str, UUID]
+    idea_id: Union[str, UUID]
+    organization_id: Optional[Union[str, UUID]] = None
+    status: str = "active"
+    codebase: dict[str, str] = {}
+    transcript: list[dict[str, Any]] = []
+    started_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class BuildMessageRequest(BaseModel):
+    message: str
 
 
 # ── WebSocket Event Models ──────────────────────────────────────

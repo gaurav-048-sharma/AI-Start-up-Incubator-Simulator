@@ -4,6 +4,7 @@ import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import styles from "./detail.module.css";
 import { ideasApi, agentsApi, reportsApi, type Idea, type AgentActivity, type Report } from "@/lib/api";
+import { FinancialDashboard } from "@/components/FinancialDashboard";
 
 const PHASES = [
   { id: "research", label: "Research", icon: "🔍" },
@@ -20,9 +21,12 @@ export default function IdeaDetailPage({ params }: { params: Promise<{ id: strin
   const [reports, setReports] = useState<Report[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [isPublishing, setIsPublishing] = useState(false);
 
   useEffect(() => {
-    async function load() {
+    let mounted = true;
+    async function load(isInitial = false) {
+      if (isInitial) setLoading(true);
       try {
         const [ideaData, activitiesData, reportsData] = await Promise.allSettled([
           ideasApi.get(id),
@@ -30,8 +34,10 @@ export default function IdeaDetailPage({ params }: { params: Promise<{ id: strin
           reportsApi.listForIdea(id),
         ]);
 
+        if (!mounted) return;
+
         if (ideaData.status === "fulfilled") setIdea(ideaData.value);
-        else setError("Idea not found");
+        else if (isInitial) setError("Idea not found");
 
         if (activitiesData.status === "fulfilled") {
           setActivities(Array.isArray(activitiesData.value) ? activitiesData.value : []);
@@ -40,12 +46,21 @@ export default function IdeaDetailPage({ params }: { params: Promise<{ id: strin
           setReports(Array.isArray(reportsData.value) ? reportsData.value : []);
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load idea");
+        if (mounted && isInitial) setError(err instanceof Error ? err.message : "Failed to load idea");
       } finally {
-        setLoading(false);
+        if (mounted && isInitial) setLoading(false);
       }
     }
-    load();
+    load(true);
+
+    const interval = setInterval(() => {
+      load(false);
+    }, 3000);
+
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
   }, [id]);
 
   const getPhaseStatus = (phaseId: string) => {
@@ -91,15 +106,60 @@ export default function IdeaDetailPage({ params }: { params: Promise<{ id: strin
           <Link href="/dashboard/ideas" className={styles.backLink}>← Back to Ideas</Link>
           <h1 className={styles.title}>{idea.title}</h1>
           <div className={styles.meta}>
-            <span className={`badge badge-${idea.status === "completed" ? "success" : idea.status === "failed" ? "error" : "info"}`}>{idea.status}</span>
+            <span className={`badge badge-${idea.status === "completed" ? "success" : idea.status === "failed" ? "error" : "info"}`} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {!['completed', 'failed', 'draft'].includes(idea.status) && (
+                <span className="loader" style={{ width: 12, height: 12, borderWidth: 2 }} />
+              )}
+              {idea.status}
+            </span>
             {idea.industry && <span className="badge badge-accent">{idea.industry}</span>}
             <span className={styles.date}>Created {new Date(idea.created_at).toLocaleDateString()}</span>
+            {idea.is_public === 1 && idea.public_slug && (
+              <a href={`/p/${idea.public_slug}`} target="_blank" rel="noopener noreferrer" className="badge badge-success" style={{ cursor: "pointer", textDecoration: "none" }}>
+                🌐 Public Link
+              </a>
+            )}
           </div>
         </div>
         <div className={styles.headerActions}>
+          <button 
+            className="btn btn-secondary btn-sm" 
+            disabled={isPublishing}
+            onClick={async () => {
+              try {
+                setIsPublishing(true);
+                const res = await ideasApi.publish(idea.id);
+                const url = `${window.location.origin}/p/${res.public_slug}`;
+                await navigator.clipboard.writeText(url);
+                alert(`Published! Link copied to clipboard:\n${url}`);
+                window.location.reload();
+              } catch (e) {
+                alert("Failed to publish");
+              } finally {
+                setIsPublishing(false);
+              }
+          }}>
+            {isPublishing ? "Publishing..." : idea.is_public === 1 ? "🔗 Copy Link" : "🌍 Publish to Web"}
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => window.location.href = `/dashboard/ideas/${idea.id}/edit`}>
+            ✏️ Edit
+          </button>
           <button className="btn btn-primary btn-sm" onClick={async () => {
             try { await ideasApi.launch(idea.id); window.location.reload(); } catch {}
           }}>🚀 Relaunch</button>
+          <button 
+            className="btn btn-secondary btn-sm" 
+            style={{ color: "var(--error)", borderColor: "var(--error-soft)" }}
+            onClick={async () => {
+              if (confirm("Are you sure you want to delete this idea? This cannot be undone.")) {
+                try {
+                  await ideasApi.delete(idea.id);
+                  window.location.href = "/dashboard/ideas";
+                } catch {
+                  alert("Failed to delete idea");
+                }
+              }
+          }}>🗑️ Delete</button>
         </div>
       </div>
 
@@ -163,6 +223,22 @@ export default function IdeaDetailPage({ params }: { params: Promise<{ id: strin
             </>
           )}
         </div>
+      </div>
+
+      {/* Render Full Reports */}
+      <div style={{ marginTop: "var(--space-12)" }}>
+        {reports.map(r => (
+          <div key={r.id} className="glass-card" style={{ marginBottom: "var(--space-8)" }}>
+            <h3 style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "var(--space-4)", marginBottom: "var(--space-6)" }}>
+              {r.title}
+            </h3>
+            {r.report_type === "financial_projection" && typeof r.content === 'string' ? (
+              <FinancialDashboard content={r.content} />
+            ) : (
+              <div className="prose prose-invert max-w-none" dangerouslySetInnerHTML={{ __html: typeof r.content === 'string' ? r.content : JSON.stringify(r.content) }} />
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
