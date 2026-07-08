@@ -98,7 +98,7 @@ export function FinancialDashboard({ content }: FinancialDashboardProps) {
                 <Tooltip 
                   contentStyle={{ backgroundColor: "#18181b", borderColor: "#27272a", borderRadius: "8px" }}
                   itemStyle={{ color: "#fff" }}
-                  formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
+                  formatter={(value: any) => [`$${Number(value).toLocaleString()}`, ""]}
                 />
                 <Legend />
                 <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#10b981" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
