@@ -22,7 +22,7 @@ from typing import Optional
 from datetime import datetime, timezone
 import contextvars
 
-# note: `asyncio`, `get_settings`, and `get_supabase_client` are imported locally where needed
+# note: `asyncio` and `get_settings` are imported locally where needed
 
 # ── Caching Layer ────────────────────────────────────────────────
 # Caching role data for 60 seconds to avoid multi-second DB latency
@@ -390,7 +390,7 @@ async def get_current_user(
         user_profile = await db.get_profile(user_id)
         
         if not user_profile:
-             # Provide fallback profile since custom OTP doesn't use Supabase Auth
+             # Provide fallback profile since custom OTP doesn't use external Auth
              user_profile = {
                  "id": user_id,
                  "email": payload.get("email"),
@@ -639,7 +639,7 @@ def require_feature(feature: str):
         from app.config import get_settings
         settings = get_settings()
         # In demo/development mode, enable features for easier testing
-        if not settings.has_supabase or settings.debug or settings.environment == "development":
+        if settings.debug or settings.environment == "development":
             return user
 
         if user.get("platform_role") == "super_admin":

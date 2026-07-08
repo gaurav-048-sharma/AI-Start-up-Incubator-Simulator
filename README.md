@@ -7,10 +7,10 @@ This project is an AI Venture Operating System—a SaaS platform that acts like 
 ## Architecture
 
 ```
-Frontend (Next.js 16)  ←→  Backend (FastAPI/Python)  ←→  Supabase (PostgreSQL)
-     ↕                          ↕
-  Supabase Auth          CrewAI + LangGraph + AutoGen
-  Supabase Realtime      Gemini / Anthropic
+Frontend (Next.js 16)  <-->  Backend (FastAPI/Python)  <-->  SQLite Database
+     |                           | 
+  Custom Auth            CrewAI + LangGraph + AutoGen
+  WebSockets             Gemini / Anthropic
 ```
 
 ## Quick Start
@@ -93,8 +93,7 @@ npm run dev
 │       ├── tools/     # Search, financial, code tools
 │       ├── models/    # Pydantic schemas + DB client
 │       └── services/  # LLM, Analytics, Notifications
-├── supabase/          # Database migrations
-└── docker-compose.yml # Local dev orchestration
+├── docker-compose.yml # Local dev orchestration
 ```
 
 ## AI Agents
@@ -134,6 +133,6 @@ Research → Quality Gate → Plan → Build → Simulate → Complete
 - **Frontend**: Next.js 16, TypeScript, CSS Modules (Glassmorphism design system)
 - **Backend**: FastAPI, Python 3.12, Pydantic v2
 - **AI**: CrewAI, LangGraph, AutoGen, Gemini/Anthropic
-- **Database**: Supabase (PostgreSQL + Auth + Realtime + Storage)
+- **Database**: SQLite (Local)
 - **Infrastructure**: Docker Compose, Redis, Prometheus, Grafana
 - **Deployment**: Vercel (frontend) + Railway (backend)

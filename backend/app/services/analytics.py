@@ -124,7 +124,7 @@ class AnalyticsService:
             updates = {"total_tokens_used": tokens}  # Will use RPC for atomic increment
             if event_type == "workflow_run":
                 updates["total_workflows_run"] = 1
-            # For now, do a simple update (in production use Supabase RPC for atomic ops)
+            # For now, do a simple update
         except Exception as e:
             logger.warning("Counter update skipped", error=str(e))
 

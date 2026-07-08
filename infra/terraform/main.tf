@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════
 # Terraform — AI Start-up Incubator Infrastructure
-# Targets: Vercel (frontend) + Railway (backend) + Supabase (DB)
+# Targets: Vercel (frontend) + Railway (backend)
 # ═══════════════════════════════════════════════════════════════
 
 terraform {
@@ -29,16 +29,6 @@ variable "project_name" {
   default = "ai-incubator"
 }
 
-variable "supabase_url" {
-  type      = string
-  sensitive = true
-}
-
-variable "supabase_anon_key" {
-  type      = string
-  sensitive = true
-}
-
 variable "backend_url" {
   type    = string
   default = "https://api.yourdomain.com"
@@ -59,18 +49,6 @@ resource "vercel_project" "frontend" {
   }
 
   root_directory = "frontend"
-
-  environment {
-    key    = "NEXT_PUBLIC_SUPABASE_URL"
-    value  = var.supabase_url
-    target = ["production", "preview"]
-  }
-
-  environment {
-    key    = "NEXT_PUBLIC_SUPABASE_ANON_KEY"
-    value  = var.supabase_anon_key
-    target = ["production", "preview"]
-  }
 
   environment {
     key    = "NEXT_PUBLIC_API_URL"
