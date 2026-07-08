@@ -33,7 +33,7 @@ export default function EditIdeaPage({ params }: { params: Promise<{ id: string 
     load();
   }, [id]);
 
-  const updateField = (field: keyof IdeaUpdate, value: string) => {
+  const updateField = (field: keyof Partial<IdeaCreate>, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
