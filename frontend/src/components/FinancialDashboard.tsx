@@ -120,7 +120,7 @@ export function FinancialDashboard({ content }: FinancialDashboardProps) {
                 <Tooltip 
                   contentStyle={{ backgroundColor: "#18181b", borderColor: "#27272a", borderRadius: "8px" }}
                   itemStyle={{ color: "#fff" }}
-                  formatter={(value: number) => [value.toLocaleString(), "Users"]}
+                  formatter={(value: any) => [Number(value).toLocaleString(), "Users"]}
                 />
                 <Legend />
                 <Bar dataKey="users" name="Active Users" fill="#3b82f6" radius={[4, 4, 0, 0]} />
