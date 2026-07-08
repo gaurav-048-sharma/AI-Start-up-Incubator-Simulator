@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: ai-incubator-backend
+    env: python
+    buildCommand: "cd backend && pip install -r requirements.txt"
+    startCommand: "cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: NVIDIA_API_KEY_1
+        sync: false
+      - key: NVIDIA_API_KEY_2
+        sync: false
+      - key: NVIDIA_API_KEY_3
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
