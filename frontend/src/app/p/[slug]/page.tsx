@@ -117,7 +117,7 @@ export default function PublicIdeaPage({ params }: { params: Promise<{ slug: str
           <div>
             <h2 className="text-3xl font-bold mb-8">Market Analysis</h2>
             <div className="prose prose-invert prose-lg max-w-none bg-zinc-900 border border-zinc-800 p-8 rounded-2xl">
-              <div dangerouslySetInnerHTML={{ __html: marketReport.content as string }} />
+              <div dangerouslySetInnerHTML={{ __html: marketReport.content as unknown as string }} />
             </div>
           </div>
         )}
@@ -127,7 +127,7 @@ export default function PublicIdeaPage({ params }: { params: Promise<{ slug: str
           <div>
             <h2 className="text-3xl font-bold mb-8">Technical Architecture</h2>
             <div className="prose prose-invert prose-lg max-w-none bg-zinc-900 border border-zinc-800 p-8 rounded-2xl">
-              <div dangerouslySetInnerHTML={{ __html: techReport.content as string }} />
+              <div dangerouslySetInnerHTML={{ __html: techReport.content as unknown as string }} />
             </div>
           </div>
         )}
