@@ -121,3 +121,4 @@ postgres_data/
 backend/.venv311/
 test_output.txt
 backend/tmp_test_422.py
+.vercel
