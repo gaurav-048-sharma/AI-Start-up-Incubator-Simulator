@@ -2,12 +2,12 @@
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
-import { ideasApi, type IdeaUpdate } from "@/lib/api";
+import { ideasApi, type IdeaCreate } from "@/lib/api";
 
 export default function EditIdeaPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
-  const [form, setForm] = useState<IdeaUpdate>({});
+  const [form, setForm] = useState<Partial<IdeaCreate>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
