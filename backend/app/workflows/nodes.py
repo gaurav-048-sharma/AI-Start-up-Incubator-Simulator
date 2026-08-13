@@ -1,49 +1,103 @@
 """
 LangGraph Workflow Nodes — Defines the processing nodes in the incubation workflow.
 Each node reads from the state, performs work, and returns state updates.
+
+Every node now streams granular events to the EventBus (app.services.events):
+  phase   — node lifecycle (started / completed)
+  agent   — per-agent status (thinking / complete / error) for the live dashboard
+  log     — human-readable terminal lines
+  quality — quality-gate verdicts
+  sim     — investor pitch transcript turns
+
+Publishing is fire-and-forget into bounded queues, so a slow (or absent)
+WebSocket client can never block agent execution.
 """
 
+import time
 import structlog
 from datetime import datetime, timezone
 
+from app.config import get_settings
 from app.workflows.state import IncubatorState
 from app.agents.crew import get_incubator_crew
 from app.services.llm import get_llm_service
+from app.services.events import bus
 
 logger = structlog.get_logger()
+
+AGENT_NAMES = {
+    "market_analyst": "Market Analyst",
+    "tech_architect": "Tech Architect",
+    "product_manager": "Product Manager",
+    "growth_strategist": "Growth Strategist",
+    "financial_analyst": "Financial Analyst",
+    "operations_manager": "Operations Manager",
+    "legal_advisor": "Legal Advisor",
+}
+
+
+def _idea_id(state: IncubatorState) -> str:
+    return state.get("idea_id") or state.get("idea", {}).get("id", "")
+
+
+async def _run_agent_streamed(idea_id: str, role: str, idea: dict) -> str:
+    """Run one agent while streaming its lifecycle to the dashboard."""
+    crew = get_incubator_crew()
+    name = AGENT_NAMES.get(role, role)
+
+    await bus.publish(idea_id, "agent", {"agent": role, "status": "thinking"})
+    await bus.publish(idea_id, "log", {"agent": role, "level": "info", "message": f"{name} engaged"})
+
+    t0 = time.perf_counter()
+    try:
+        output = await crew.run_single_agent(role, idea)
+    except Exception as exc:
+        await bus.publish(idea_id, "agent", {"agent": role, "status": "error", "detail": str(exc)[:200]})
+        await bus.publish(idea_id, "log", {"agent": role, "level": "error", "message": f"{name} failed — {exc}"})
+        raise
+
+    duration_ms = int((time.perf_counter() - t0) * 1000)
+    await bus.publish(idea_id, "agent", {"agent": role, "status": "complete", "duration_ms": duration_ms})
+    await bus.publish(idea_id, "log", {
+        "agent": role, "level": "success",
+        "message": f"{name} delivered {len(output):,} chars in {duration_ms / 1000:.1f}s",
+    })
+    return output
 
 
 async def research_node(state: IncubatorState) -> dict:
     """
-    RESEARCH NODE — Runs Market Analyst and Tech Architect.
+    RESEARCH NODE — Runs Market Analyst, Tech Architect, and Product Manager.
     First phase of the incubation workflow.
     """
     idea = state["idea"]
-    logger.info("Research node started", idea_title=idea.get("title"))
+    idea_id = _idea_id(state)
+    iteration = state.get("iteration", 0) + 1
+    logger.info("Research node started", idea_title=idea.get("title"), iteration=iteration)
+
+    await bus.publish(idea_id, "phase", {"phase": "research", "status": "started", "iteration": iteration})
 
     try:
-        crew = get_incubator_crew()
+        market_output = await _run_agent_streamed(idea_id, "market_analyst", idea)
+        tech_output = await _run_agent_streamed(idea_id, "tech_architect", idea)
+        product_output = await _run_agent_streamed(idea_id, "product_manager", idea)
 
-        # Run market research
-        market_output = await crew.run_single_agent("market_analyst", idea)
-
-        # Run tech architecture (can use market research for context)
-        tech_output = await crew.run_single_agent("tech_architect", idea)
-
-        # Run product management
-        product_output = await crew.run_single_agent("product_manager", idea)
+        await bus.publish(idea_id, "phase", {"phase": "research", "status": "completed", "iteration": iteration})
 
         return {
             "market_research": market_output,
             "tech_architecture": tech_output,
             "product_spec": product_output,
+            "iteration": 1,  # operator.add reducer — counts research passes for the quality-gate loop
             "current_phase": "validate",
-            "messages": [f"[{_timestamp()}] Research phase completed — market analysis, tech architecture, and product spec generated."],
+            "messages": [f"[{_timestamp()}] Research pass {iteration} completed — market analysis, tech architecture, and product spec generated."],
         }
     except Exception as e:
         logger.error("Research node failed", error=str(e))
+        await bus.publish(idea_id, "log", {"level": "error", "message": f"Research phase error: {e}"})
         return {
             "errors": [f"Research failed: {str(e)}"],
+            "iteration": 1,
             "current_phase": "validate",
             "messages": [f"[{_timestamp()}] Research phase encountered errors: {str(e)}"],
         }
@@ -55,11 +109,15 @@ async def validate_node(state: IncubatorState) -> dict:
     Assigns quality scores and determines if re-research is needed.
     """
     logger.info("Validate node started")
+    idea_id = _idea_id(state)
+    settings = get_settings()
+
+    await bus.publish(idea_id, "phase", {"phase": "validate", "status": "started"})
+    await bus.publish(idea_id, "log", {"level": "info", "message": "Quality gate — scoring research outputs"})
 
     try:
         llm_service = get_llm_service()
 
-        # Build validation prompt
         validation_prompt = (
             "You are a quality assurance reviewer for startup research reports. "
             "Evaluate the following research outputs and assign a quality score from 0.0 to 1.0 "
@@ -75,9 +133,26 @@ async def validate_node(state: IncubatorState) -> dict:
 
         response = await llm_service.generate(validation_prompt)
 
-        # Parse scores from response
         scores = _parse_quality_scores(response)
         overall = scores.get("overall", 0.5)
+        passed = overall >= settings.quality_threshold
+
+        await bus.publish(idea_id, "quality", {
+            "score": overall,
+            "threshold": settings.quality_threshold,
+            "passed": passed,
+            "iteration": state.get("iteration", 0),
+            "scores": scores,
+        })
+        await bus.publish(idea_id, "log", {
+            "level": "success" if passed else "warn",
+            "message": (
+                f"Quality gate {'PASSED' if passed else 'FAILED'} — "
+                f"{overall:.2f} vs threshold {settings.quality_threshold:.2f}"
+                + ("" if passed else " — looping back to research")
+            ),
+        })
+        await bus.publish(idea_id, "phase", {"phase": "validate", "status": "completed"})
 
         return {
             "quality_scores": scores,
@@ -87,13 +162,14 @@ async def validate_node(state: IncubatorState) -> dict:
             "messages": [f"[{_timestamp()}] Validation complete — overall quality: {overall:.2f}"],
             "decisions": [{
                 "node": "validate",
-                "decision": "proceed" if overall >= 0.7 else "needs_improvement",
+                "decision": "proceed" if passed else "needs_improvement",
                 "score": overall,
                 "timestamp": _timestamp(),
             }],
         }
     except Exception as e:
         logger.error("Validate node failed", error=str(e))
+        await bus.publish(idea_id, "log", {"level": "warn", "message": f"Validation skipped due to error: {e}"})
         return {
             "overall_quality": 0.5,
             "current_phase": "plan",
@@ -104,26 +180,22 @@ async def validate_node(state: IncubatorState) -> dict:
 
 async def plan_node(state: IncubatorState) -> dict:
     """
-    PLAN NODE — Runs Growth Strategist and Financial Analyst.
-    Uses market research context for informed planning.
+    PLAN NODE — Runs Growth Strategist, Financial Analyst, Legal Advisor,
+    and Operations Manager, using research context for informed planning.
     """
     idea = state["idea"]
+    idea_id = _idea_id(state)
     logger.info("Plan node started", idea_title=idea.get("title"))
 
+    await bus.publish(idea_id, "phase", {"phase": "plan", "status": "started"})
+
     try:
-        crew = get_incubator_crew()
+        growth_output = await _run_agent_streamed(idea_id, "growth_strategist", idea)
+        financial_output = await _run_agent_streamed(idea_id, "financial_analyst", idea)
+        legal_output = await _run_agent_streamed(idea_id, "legal_advisor", idea)
+        operations_output = await _run_agent_streamed(idea_id, "operations_manager", idea)
 
-        # Run growth strategy
-        growth_output = await crew.run_single_agent("growth_strategist", idea)
-
-        # Run financial analysis
-        financial_output = await crew.run_single_agent("financial_analyst", idea)
-
-        # Run legal review
-        legal_output = await crew.run_single_agent("legal_advisor", idea)
-
-        # Run operations planning
-        operations_output = await crew.run_single_agent("operations_manager", idea)
+        await bus.publish(idea_id, "phase", {"phase": "plan", "status": "completed"})
 
         return {
             "growth_strategy": growth_output,
@@ -135,6 +207,7 @@ async def plan_node(state: IncubatorState) -> dict:
         }
     except Exception as e:
         logger.error("Plan node failed", error=str(e))
+        await bus.publish(idea_id, "log", {"level": "error", "message": f"Planning phase error: {e}"})
         return {
             "errors": [f"Planning failed: {str(e)}"],
             "current_phase": "build",
@@ -148,11 +221,14 @@ async def build_node(state: IncubatorState) -> dict:
     Synthesizes all agent outputs into investor-ready materials.
     """
     logger.info("Build node started")
+    idea_id = _idea_id(state)
+
+    await bus.publish(idea_id, "phase", {"phase": "build", "status": "started"})
+    await bus.publish(idea_id, "log", {"level": "info", "message": "Synthesizing executive summary from all agent reports"})
 
     try:
         llm_service = get_llm_service()
 
-        # Generate executive summary
         summary_prompt = (
             "You are a startup pitch expert. Based on the following research and analysis, "
             "create a compelling executive summary (2-3 pages) that an investor can read in 5 minutes.\n\n"
@@ -176,8 +252,8 @@ async def build_node(state: IncubatorState) -> dict:
         )
 
         executive_summary = await llm_service.generate(summary_prompt)
+        await bus.publish(idea_id, "log", {"level": "success", "message": "Executive summary generated"})
 
-        # Generate pitch deck content
         pitch_prompt = (
             "Based on all the research above, create a 12-slide pitch deck outline "
             "with specific content for each slide. Format as:\n"
@@ -188,6 +264,8 @@ async def build_node(state: IncubatorState) -> dict:
         )
 
         pitch_deck = await llm_service.generate(pitch_prompt)
+        await bus.publish(idea_id, "log", {"level": "success", "message": "Pitch deck content generated"})
+        await bus.publish(idea_id, "phase", {"phase": "build", "status": "completed"})
 
         reports = [
             {"type": "market_research", "title": "Market Research Report", "status": "completed"},
@@ -210,6 +288,7 @@ async def build_node(state: IncubatorState) -> dict:
         }
     except Exception as e:
         logger.error("Build node failed", error=str(e))
+        await bus.publish(idea_id, "log", {"level": "error", "message": f"Build phase error: {e}"})
         return {
             "errors": [f"Build failed: {str(e)}"],
             "current_phase": "simulate",
@@ -220,32 +299,55 @@ async def build_node(state: IncubatorState) -> dict:
 async def simulate_node(state: IncubatorState) -> dict:
     """
     SIMULATE NODE — Runs investor pitch simulation using AutoGen.
-    Founder agent pitches to investor agents.
+    Founder agent pitches to investor agents; every transcript turn is
+    streamed to the dashboard as a `sim` event.
     """
     logger.info("Simulate node started")
+    idea_id = _idea_id(state)
+
+    await bus.publish(idea_id, "phase", {"phase": "simulate", "status": "started"})
+    await bus.publish(idea_id, "log", {"level": "info", "message": "Investor pitch simulation — founder enters the room"})
 
     try:
         from app.simulation.pitch_engine import PitchEngine
 
         engine = PitchEngine()
+
+        async def stream_turn(turn: dict) -> None:
+            """Push each pitch turn to the dashboard the moment it happens."""
+            await bus.publish(idea_id, "sim", {
+                "speaker": turn.get("speaker", "Unknown"),
+                "role": turn.get("role", ""),
+                "content": turn.get("content", ""),
+            })
+
         result = await engine.run_pitch(
             idea=state["idea"],
             executive_summary=state.get("executive_summary", ""),
             financial_projection=state.get("financial_projection", ""),
+            on_turn=stream_turn,
         )
+
+        outcome = result.get("outcome", "undetermined")
+        await bus.publish(idea_id, "log", {
+            "level": "success" if outcome == "funded" else "warn",
+            "message": f"Simulation verdict: {outcome.upper()}",
+        })
+        await bus.publish(idea_id, "phase", {"phase": "simulate", "status": "completed"})
 
         return {
             "simulation_transcript": result.get("transcript", []),
-            "simulation_outcome": result.get("outcome", "undetermined"),
+            "simulation_outcome": outcome,
             "investor_feedback": result.get("feedback", {}),
             "funding_offered": result.get("funding_offered"),
             "valuation": result.get("valuation"),
             "current_phase": "completed",
             "status": "completed",
-            "messages": [f"[{_timestamp()}] Simulation completed — outcome: {result.get('outcome', 'N/A')}"],
+            "messages": [f"[{_timestamp()}] Simulation completed — outcome: {outcome}"],
         }
     except Exception as e:
         logger.error("Simulate node failed", error=str(e))
+        await bus.publish(idea_id, "log", {"level": "error", "message": f"Simulation error: {e}"})
         return {
             "current_phase": "completed",
             "status": "completed",
@@ -257,6 +359,10 @@ async def simulate_node(state: IncubatorState) -> dict:
 async def error_handler_node(state: IncubatorState) -> dict:
     """Handle workflow errors gracefully."""
     logger.warning("Error handler triggered", errors=state.get("errors", []))
+    idea_id = _idea_id(state)
+    await bus.publish(idea_id, "error", {
+        "message": "; ".join(state.get("errors", [])[-3:]) or "Workflow encountered unrecoverable errors.",
+    })
     return {
         "status": "failed",
         "messages": [f"[{_timestamp()}] Workflow encountered unrecoverable errors."],

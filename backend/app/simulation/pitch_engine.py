@@ -54,6 +54,74 @@ class PitchEngine:
         msg = self._msg(first_investor["name"], "investor", opening_question)
         return {"message": msg, "investors": investors}
 
+    async def run_pitch(
+        self,
+        idea: dict,
+        executive_summary: str = "",
+        financial_projection: str = "",
+        rounds: int = 3,
+        on_turn=None,
+    ) -> dict:
+        """
+        Run a fully autonomous pitch simulation (used by the LangGraph
+        simulate node). The founder agent pitches, each investor asks a
+        question, the founder answers, then all investors issue verdicts.
+
+        `on_turn` is an optional async callback invoked with every
+        transcript message as it is produced — the workflow uses it to
+        stream turns to the live dashboard in real time.
+
+        Returns: {"transcript", "outcome", "feedback", "funding_offered", "valuation"}
+        """
+        from app.simulation.founder_agent import build_founder_system_prompt
+
+        investors = get_investor_profiles(self._settings.num_investor_agents)
+        transcript: list[dict] = []
+
+        async def _add(msg: dict) -> None:
+            transcript.append(msg)
+            if on_turn:
+                try:
+                    await on_turn(msg)
+                except Exception:  # streaming must never kill the simulation
+                    logger.warning("on_turn callback failed", exc_info=True)
+
+        # 1) Founder opens with a compressed pitch
+        opening = (executive_summary or idea.get("description", "")).strip()[:1500]
+        await _add(self._msg("Founder", "founder", opening or f"Pitching: {idea.get('title', 'our startup')}"))
+
+        founder_system = build_founder_system_prompt(idea, executive_summary, financial_projection)
+
+        # 2) Q&A rounds — round-robin across investor personas
+        for r in range(max(1, rounds)):
+            investor = investors[r % len(investors)]
+            question = await self._llm_service.generate(
+                prompt=(
+                    f"Pitch conversation so far:\n{self._build_context(transcript)}\n\n"
+                    "Ask the founder ONE tough, critical question. Be concise and stay in character."
+                ),
+                system_prompt=get_investor_system_prompt(investor),
+            )
+            await _add(self._msg(investor["name"], "investor", question))
+
+            answer = await self._llm_service.generate(
+                prompt=(
+                    f"Pitch conversation so far:\n{self._build_context(transcript)}\n\n"
+                    f"The investor just asked:\n{question}\n\n"
+                    "Answer convincingly in under 150 words. Concede honest risks; never invent metrics."
+                ),
+                system_prompt=founder_system,
+            )
+            await _add(self._msg("Founder", "founder", answer))
+
+        # 3) Verdicts
+        final = await self._generate_final_verdicts(transcript, investors)
+        for msg in final.get("verdict_messages", []):
+            await _add(msg)
+
+        final["transcript"] = transcript
+        return final
+
     async def process_interactive_turn(
         self,
         idea: dict,

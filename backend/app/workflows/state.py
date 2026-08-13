@@ -35,8 +35,10 @@ class IncubatorState(TypedDict, total=False):
     # ── Agent Outputs ────────────────────────────────────────────
     market_research: str  # Market Analyst output
     tech_architecture: str  # Tech Architect output
+    product_spec: str  # Product Manager output
     growth_strategy: str  # Growth Strategist output
     financial_projection: str  # Financial Analyst output
+    operations_plan: str  # Operations Manager output
     legal_review: str  # Legal Advisor output
 
     # ── Quality Scores ───────────────────────────────────────────
@@ -70,8 +72,10 @@ DEFAULT_STATE: dict = {
     "errors": [],
     "market_research": "",
     "tech_architecture": "",
+    "product_spec": "",
     "growth_strategy": "",
     "financial_projection": "",
+    "operations_plan": "",
     "legal_review": "",
     "quality_scores": {},
     "overall_quality": 0.0,

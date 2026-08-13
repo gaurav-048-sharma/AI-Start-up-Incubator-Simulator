@@ -196,7 +196,15 @@ async def run_incubation_workflow(idea: dict, user_id: str) -> dict:
     logger.info("Starting incubation workflow", idea_title=idea.get("title"))
 
     from app.models.database import get_db_service
+    from app.services.events import bus
     db = get_db_service()
+
+    idea_id = idea.get("id", "")
+    await bus.clear(idea_id)  # fresh event timeline for this run
+    await bus.publish(idea_id, "status", {
+        "status": "running",
+        "title": idea.get("title", ""),
+    })
 
     progress_map = {
         "research": {"progress": 25, "status": "researching"},
@@ -219,6 +227,7 @@ async def run_incubation_workflow(idea: dict, user_id: str) -> dict:
                 if node_name in progress_map:
                     update_info = progress_map[node_name]
                     await db.update_idea(idea["id"], update_info)
+                    await bus.publish(idea_id, "progress", {"node": node_name, **update_info})
                 
                 # Log activities for the dashboard
                 if node_name == "research":
@@ -263,5 +272,18 @@ async def run_incubation_workflow(idea: dict, user_id: str) -> dict:
     # Ensure it always reaches 100% at the end
     final_status = "failed" if final_state.get("status") == "failed" else "completed"
     await db.update_idea(idea["id"], {"progress": 100, "status": final_status})
+
+    if final_status == "completed":
+        await bus.publish(idea_id, "complete", {
+            "outcome": final_state.get("simulation_outcome"),
+            "funding_offered": final_state.get("funding_offered"),
+            "valuation": final_state.get("valuation"),
+            "quality": final_state.get("overall_quality", 0.0),
+            "iterations": final_state.get("iteration", 0),
+        })
+    else:
+        await bus.publish(idea_id, "error", {
+            "message": "; ".join(final_state.get("errors", [])[-3:]) or "Workflow failed.",
+        })
 
     return dict(final_state)

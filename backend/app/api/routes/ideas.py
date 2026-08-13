@@ -158,17 +158,26 @@ async def launch_incubation(
     if False:
         raise HTTPException(status_code=403, detail="Unauthorized: Cannot launch simulation for other department.")
 
+    # Dedup guard — a second launch while one is running would double-run
+    # every agent (and double-spend tokens).
+    from app.services.task_manager import launch_task, is_task_running
+    task_key = f"incubation:{idea_id}"
+    if is_task_running(task_key):
+        return {
+            "idea_id": idea_id,
+            "status": "already_running",
+            "message": f"Incubation for '{idea['title']}' is already in progress.",
+        }
+
     # Update status to processing and reset progress
     await db.update_idea(idea_id, {"status": "processing", "progress": 0, "updated_at": datetime.now(timezone.utc).isoformat()})
     await db.clear_idea_artifacts(idea_id)
-    
-    # Run workflow in background
-    background_tasks.add_task(
-        run_incubation_workflow,
-        idea,
-        user["id"],
-    )
-    
+
+    # Run the workflow as a supervised asyncio task — the request returns
+    # immediately; agent work is offloaded to threads inside the crew layer,
+    # so the event loop (and every other request) stays unblocked.
+    launch_task(task_key, run_incubation_workflow(idea, user["id"]))
+
     return {
         "idea_id": idea_id,
         "status": "launched",

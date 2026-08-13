@@ -20,11 +20,16 @@ async def _authenticate_ws(websocket: WebSocket, token: str | None) -> dict | No
     WebSocket cannot use standard HTTP auth headers, so we accept the token
     as a query parameter: ws://host/ws/...?token=<jwt>
     """
+    from app.config import get_settings
+
+    if get_settings().bypass_auth:
+        # Dev mode — no JWT required
+        return {"id": "dev", "email": None, "platform_role": "super_admin"}
+
     if not token:
         return None
 
     try:
-        from app.config import get_settings
         settings = get_settings()
 
         import jwt
@@ -113,6 +118,68 @@ manager = ConnectionManager()
 
 def get_connection_manager() -> ConnectionManager:
     return manager
+
+
+@router.websocket("/ws/ideas/{idea_id}")
+async def workflow_stream(
+    websocket: WebSocket,
+    idea_id: str,
+    token: str | None = Query(default=None),
+):
+    """
+    Primary live-workflow stream for the Command Center dashboard.
+
+    Protocol (JSON frames):
+      snapshot — sent once on connect: bounded replay of the current run's
+                 events, so a page refresh mid-run reconstructs the timeline.
+      <event>  — phase / agent / log / quality / sim / progress / status /
+                 complete / error, each with a per-idea monotonic `seq`
+                 (lets the client de-dupe after reconnect).
+      ping     — heartbeat every 25s of silence; keeps proxies from
+                 killing idle connections.
+
+    Backpressure: the workflow publishes into a bounded per-subscriber
+    queue (drop-oldest), so a slow client can never block agent execution.
+    """
+    user = await _authenticate_ws(websocket, token)
+    if not user:
+        await websocket.close(code=4001, reason="Authentication required")
+        return
+
+    has_access = await _verify_idea_access(user, idea_id)
+    if not has_access and user.get("platform_role") != "super_admin":
+        await websocket.close(code=4003, reason="Access denied to this idea")
+        return
+
+    from app.services.events import bus
+
+    await websocket.accept()
+    queue, replay = await bus.subscribe(idea_id)
+    logger.info("Workflow WS connected", idea_id=idea_id, replayed=len(replay))
+
+    try:
+        await websocket.send_json({
+            "v": 1,
+            "type": "snapshot",
+            "idea_id": idea_id,
+            "seq": 0,
+            "ts": datetime.now(timezone.utc).timestamp(),
+            "data": {"events": replay},
+        })
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=25.0)
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "ping"})
+                continue
+            await websocket.send_json(event)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:  # client vanished mid-send, etc.
+        logger.debug("Workflow WS closed", idea_id=idea_id, error=str(e))
+    finally:
+        await bus.unsubscribe(idea_id, queue)
+        logger.info("Workflow WS disconnected", idea_id=idea_id)
 
 
 @router.websocket("/ws/ideas/{idea_id}/agents")
